@@ -1,0 +1,45 @@
+{
+  "experiment": "experiments/2026-10-11-r6e-bisect",
+  "run": "r6e-bisect-w2",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "measure",
+      "bench": false,
+      "bracket": false,
+      "extras": [
+        [
+          "experiments/2026-10-09-tilelang-migration/token_determinism.py",
+          [
+            "--tokens",
+            "192",
+            "--long-lines",
+            "700",
+            "--wide"
+          ],
+          "determinism"
+        ],
+        [
+          "row_trace_session.py",
+          [
+            "--prompt",
+            "4",
+            "--around",
+            "4",
+            "--prompt-rows",
+            "6"
+          ],
+          "trace"
+        ]
+      ],
+      "arms": [
+        {
+          "config": "r6e-trace.json",
+          "label": "trace"
+        }
+      ]
+    }
+  ]
+}
