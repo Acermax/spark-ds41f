@@ -168,3 +168,21 @@ The router across step sizes. `test_gate_router_rows_do_not_depend_on_the_step`
 requires every row's gate logits, expert ids and weights to equal the full batch's bit
 for bit. Small row counts take the fused gate router, larger ones the gate's in-kernel
 shards then TileKernels.
+
+### Window 5 (2026-10-11, 16:01-16:03 UTC): the trace crashed on the drafter
+
+The DSpark drafter's decoder layers are the same class. They recorded into the
+target's trace with the target's matched row indices and indexed past their own five
+rows (`IndexError`), which took the server down. vLLM `f9669d2c4` ends the trace with
+the target model's forward and skips rows a tensor does not hold.
+
+### Window 6 results (2026-10-11, 16:03 UTC)
+
+The router tests passed (47), `test_gate_router_rows_do_not_depend_on_the_step`
+included. At 1-2048 rows every row's gate logits, expert ids and weights equal the
+6814-row batch's bit for bit, through both the fused gate router and the gate then
+TileKernels. The routing is not the batch dependence.
+
+## Window 7 ([w7.json](w7.json))
+
+Window 5's trace on `f9669d2c4`.
