@@ -1,0 +1,39 @@
+{
+  "experiment": "experiments/2026-10-11-precision-acceptance",
+  "run": "precision-acceptance-w1",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "measure",
+      "profile": "lean",
+      "bench": false,
+      "bracket": true,
+      "extras": [
+        [
+          "scripts/acceptance_sweep.py",
+          [
+            "--tokens",
+            "256"
+          ],
+          "sweep"
+        ]
+      ],
+      "arms": [
+        {
+          "config": "experiments/2026-10-10-r6d-deterministic/r6d-tp4.json",
+          "label": "r6d"
+        },
+        {
+          "config": "experiments/2026-10-11-fp32-head/fp32head.json",
+          "label": "fp32head"
+        },
+        {
+          "config": "experiments/2026-10-11-shared-swiglu/swiglu.json",
+          "label": "swiglu"
+        }
+      ]
+    }
+  ]
+}
