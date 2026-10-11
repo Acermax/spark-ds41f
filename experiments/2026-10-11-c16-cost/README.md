@@ -91,3 +91,10 @@ The c16 torch profile adds one lead it cannot separate from the text: r6f's NCCL
 all-gathers take 759 µs a call against 573 and run more often (163 against 115), while
 sparknet's one-shot all-gathers run less. FP32 logits double the gathered bytes, so steps
 from 17 rows on TP4 cross the 2 MiB one-shot shard limit and go to NCCL.
+
+## Window 6 ([w6.json](w6.json)): the all-gather shard limit
+
+The promoted r6f image (`config/cluster-tp4.json`) with real-row profiling, at sparknet's
+all-gather shard limit of 2 MiB (r6f), 4 MiB (the TP3 recipe's) and 8 MiB, then r6f
+again. A gather copies, so the limit cannot change bits. FP32 logits at 17-32 rows fit
+4 MiB, and up to 64 rows fit 8 MiB.
