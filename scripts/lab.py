@@ -108,6 +108,24 @@ PROFILES = {
                    ("mixed_latency.py", ["--rounds", "3"], "mixed")],
     },
 }
+# The release comparison (docs/lab.md, "Release comparison"): the previous release and
+# the candidate in one session, with the same workloads every release.
+# scripts/release_table.py writes the over/under table.
+_DETERMINISM = "experiments/2026-10-09-tilelang-migration/token_determinism.py"
+_LATENCY = "experiments/2026-09-29-determinism"
+PROFILES["release"] = {
+    "bench_args": ["--suites", "quality,decode,prefill", "--min-samples", "5", "--max-samples", "10",
+                   "--precision", "2", "--concurrency", "1,2,4,8,16", "--decode-cases", "prose,code",
+                   "--prefill-text", "source", "--prefill-sizes", "1024,32768,131072,262144,524288,1000000",
+                   "--prefill-repeats", "3", "--compare", "none"],
+    "extras": [(_DETERMINISM, ["--tokens", "192", "--long-lines", "700", "--wide"], "determinism"),
+               ("scripts/acceptance_sweep.py", ["--tokens", "256"], "sweep"),
+               *[("scripts/distinct_streams.py", ["--streams", str(n), "--samples", str(s), "--tokens", "256"],
+                  f"c{n}-distinct") for n, s in ((1, 3), (4, 3), (8, 4), (16, 4))],
+               (f"{_LATENCY}/ttft_short.py", ["--reps", "3"], "ttft"),
+               (f"{_LATENCY}/mixed_latency.py", ["--rounds", "3"], "mixed")],
+    "table": "scripts/release_table.py",
+}
 BENCH_BASE = ["--allow-mismatch", "--compare", "none", "--suites", "decode,prefill",
               "--decode-cases", "prose,json-nothink", "--concurrency", "1", "--prefill-text", "source"]
 # Validation tiers: scenario sets for boot A and the restart (None = every scenario).
@@ -505,7 +523,9 @@ def measure_steps(spec: dict, job: dict) -> list[dict]:
         steps.append({"kind": "curves", "label": label, "config": config, "out": f"{out}/curves-{label}.json"})
         if job.get("bench", True):
             # "bench_args" replaces the screen's bench with the job's own (an acceptance run).
-            bench = [str(a) for a in job["bench_args"]] if "bench_args" in job else [*BENCH_BASE, *profile["bench"]]
+            bench = ([str(a) for a in job["bench_args"]] if "bench_args" in job
+                     else list(profile["bench_args"]) if "bench_args" in profile
+                     else [*BENCH_BASE, *profile["bench"]])
             steps.append({"kind": "cli", "label": label,
                           "argv": ["--cluster-config", config, "bench", *bench,
                                    "--output", f"results/private/bench/{run}-{label}"]})
@@ -514,7 +534,8 @@ def measure_steps(spec: dict, job: dict) -> list[dict]:
             steps.append({"kind": "script", "label": label,
                           "argv": [arm_config_path(experiment, script), head_url(), *extra],
                           "out": f"{out}/{stem}-{label}.jsonl"})
-    steps.append({"kind": "table", "argv": [f"{experiment}/tables_arms.py", run, *[a["label"] for a in arms]],
+    table = profile.get("table", f"{experiment}/tables_arms.py")
+    steps.append({"kind": "table", "argv": [table, run, *[a["label"] for a in arms]],
                   "out": f"results/private/lab/{run}-table.txt",
                   "curves": [f"results/private/determinism/{run}/curves-{a['label']}.json" for a in arms],
                   "summaries": [f"results/private/determinism/{run}/{stem}-{a['label']}.jsonl"

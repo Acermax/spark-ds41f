@@ -174,3 +174,47 @@ A test-suite verdict passes when the suite exits 0 and reports passed tests and 
 failures or errors.
 
 Compile caches persist per node in `~/.cache/spark-lab/compile`.
+
+## Release comparison
+
+Measure a candidate against the previous release the same way every time, so a
+change in the numbers means a change in the release, not in the method:
+
+```json
+{"kind": "measure", "profile": "release", "bracket": false,
+ "arms": [{"config": "<previous release>.json", "label": "<previous>"},
+          {"config": "<candidate>.json", "label": "<candidate>"}]}
+```
+
+- **One session, previous release first.** Both arms run back to back on the same
+  boot conditions. The previous release is the first arm, and every verdict is
+  against it.
+- **The `release` profile (`scripts/lab.py`):**
+  - quality;
+  - decode on prose and code at 1, 2, 4, 8 and 16 streams, 5-10 samples until each
+    interval is within 2%;
+  - prefill on source text at 1K, 32K, 128K, 256K, 512K and 1,000,000 tokens, three
+    repeats;
+  - the sixteen-prompt acceptance sweep;
+  - distinct prompts at 1, 4, 8 and 16 concurrent streams;
+  - short-prompt TTFT, mixed traffic, and `token_determinism.py --wide`.
+
+  About 35-40 minutes an arm on TP4.
+- **The report (`scripts/release_table.py`, the profile's table step)** gives one
+  verdict per metric. faster or slower means beyond the two arms' combined 95%
+  intervals; same means within them. Sections run from the most trustworthy down.
+
+What the rules guard against (each found the hard way, 2026-10-11):
+- **The bench's decode points follow the text.** Each is one prompt repeated on N
+  streams. A release that changes the output text (any precision change) changes the
+  workload at every point: acceptance, verification length, step time. Code c16 read
+  -8% on r6f, and sixteen distinct prompts read level. Judge throughput on distinct
+  prompts and on the paired sweep; read the bench's points as direction only.
+- **The size limit.** The bench runs only prefill sizes below max-model-len - 64, so
+  1048576 on a 1M profile is skipped silently. The profile uses 1,000,000.
+- **Repeats.** With two repeats a t interval spans tens of percent. The report uses
+  1.96 sd / sqrt(n) for prefill, with three repeats.
+- **Cost curves.** Arms run on pinned DSpark cost curves (`SPARK3_DSPARK_COST_DIR`).
+  To compare step costs, boot each arm with an empty cost directory and
+  `SPARK3_DSPARK_PROFILE_TOKENS=random`. The boot pins its real-row curves there
+  (experiments/2026-10-11-c16-cost).
