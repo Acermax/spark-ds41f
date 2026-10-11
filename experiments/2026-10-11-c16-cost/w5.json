@@ -1,0 +1,41 @@
+{
+  "experiment": "experiments/2026-10-11-c16-cost",
+  "run": "step-cost-w5",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "measure",
+      "bench": false,
+      "bracket": false,
+      "extras": [],
+      "arms": [
+        {
+          "config": "w5-r6d.json",
+          "label": "r6d"
+        },
+        {
+          "config": "w5-p1-allreduce.json",
+          "label": "p1-allreduce"
+        },
+        {
+          "config": "w5-p2-moe.json",
+          "label": "p2-moe"
+        },
+        {
+          "config": "w5-p3-head.json",
+          "label": "p3-head"
+        },
+        {
+          "config": "w5-p4-precision.json",
+          "label": "p4-precision"
+        },
+        {
+          "config": "w5-r6f.json",
+          "label": "r6f"
+        }
+      ]
+    }
+  ]
+}

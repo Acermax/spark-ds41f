@@ -49,3 +49,11 @@ The bench's c16 point is one prompt on sixteen streams, so a precision change th
 moves the text moves the workload: acceptance at code c16 goes 1.28 (r6d, p1), 1.41
 (p2), 1.64 (p3). r6d / r6f / r6d bracket on sixteen and eight distinct concurrent
 prompts (four samples) separate a throughput loss from the text.
+
+## Window 5 ([w5.json](w5.json)): step cost by piece
+
+Window 2 put r6f's real-row verify cost 1-5% above r6d's at 32-96 tokens. Window 5 boots
+each prefix of the stack with an empty cost directory and real-row profiling
+(`SPARK3_DSPARK_PROFILE_TOKENS=random`): r6d, p1-allreduce (r6d's bits), p2-moe,
+p3-head, p4-precision and r6f. Each boot pins its draft and verify curves. The prefix
+where the cost rises names the piece to make cheaper without changing its bits.
