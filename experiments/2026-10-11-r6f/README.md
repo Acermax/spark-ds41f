@@ -24,8 +24,34 @@ as r6d did.
   did, then boots it and runs `token_determinism.py --wide`. Its references must equal
   the overlay arms' (`7ae87256d3ea` / `b8b35451dcc4`), with every scenario identical.
 
-Promotion itself (root lock, profile, baseline, bench reference, docs) follows the
-owner's decision.
+## Promotion (2026-10-11)
+
+The owner promoted r6f for TP4 and TP3 on the release comparison against r6d
+([results](../2026-10-11-r6f-release-bench/README.md)).
+
+- Image: built on dgx4 from `9dfe2f1` (`build prepare` verified patch head
+  `58ea178e81f1` and tree `4127ff975d84`), `sha256:b190a776`, copied over CX7 and
+  verified on all four nodes.
+- TP4 production on the ring since 2026-10-11 20:53 UTC
+  (`cluster start --apply --replace`, ready in 82 s); `doctor --live` matches
+  (weight fragmentation warnings only).
+- Image gate: [image-determinism.jsonl](image-determinism.jsonl),
+  `token_determinism.py --tokens 192 --long-lines 700 --wide` against the live
+  service: every scenario identical, references `7ae87256d3ea` / `b8b35451dcc4`,
+  equal to the overlay arms'.
+- Root lock: [upstreams.lock.json](../../upstreams.lock.json) carries this series
+  and [manifests/sources/2026-10-11-r6f-source.json](../../manifests/sources/2026-10-11-r6f-source.json).
+- Profiles: `config/cluster-tp4.json` (this image and `VLLM_DS41_HEAD_DTYPE=float32`)
+  and the three TP3 profiles (`config/cluster.json`, `-64k`, `-4k`: this image,
+  threshold 4048, sparknet dispatch to 2 MiB, the FP32 head, no
+  `VLLM_DS41_ENGRAM_OVERLAP`, no pinned r6 lock).
+- Baseline: [2026-10-11-karmic-kraken-r6f](../../manifests/baselines/2026-10-11-karmic-kraken-r6f.json).
+- Benchmark references: the release comparison's r6f arms,
+  [TP4](../../manifests/benchmarks/2026-10-11-karmic-kraken-r6f-tp4.json) and
+  [TP3](../../manifests/benchmarks/2026-10-11-karmic-kraken-r6f.json). Both arms
+  mounted r6f's sources on the r6d image; the promoted image builds the same tree.
+- TP3 runs the baked image at the next re-cabling to the triangle; the image is
+  already on dgx1-3.
 
 ## TP3
 

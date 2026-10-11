@@ -4,10 +4,13 @@ Reproducible Docker/vLLM deployment, tuning, and benchmarks for DeepSeek V4.1
 Flash on a switchless three-node DGX Spark fabric, and the same deployment on
 a four-node ring.
 
-Production is the four-node TP4 1M profile on **r6d** (2026-10-10,
-[promotion record](experiments/2026-10-10-r6d-deterministic/README.md)): r6c's
-rebase plus the first TileLang migration ports, with temperature-0 outputs that
-do not depend on the batch. The three-node profiles stay on r6.
+Production is the four-node TP4 1M profile on **r6f** (2026-10-11,
+[promotion record](experiments/2026-10-11-r6f/README.md)), and the three-node
+profiles are promoted to r6f too. r6f is r6d plus arithmetic at DeepSeek's
+reference precision (FP32 logits, an exact FP32 mHC projection, the shared
+expert's SwiGLU in FP32, MoE partials rounded once), more TileLang ports and a
+per-request attention split, so temperature-0 outputs do not depend on the
+batch even when decode requests share a step with a prefill.
 
 The promoted kernel family is **TileLang** (r6): TileLang kernels for SM121,
 with DeepSeek's TileKernels and the one-shot RoCE collectives of
@@ -80,12 +83,10 @@ until the profile's kernel, fabric and image checks pass.
 
 ## Current baseline
 
-The production (TP4) baseline is
-[manifests/baselines/2026-10-10-karmic-kraken-r6d.json](manifests/baselines/2026-10-10-karmic-kraken-r6d.json)
-(see [docs/current-state.md](docs/current-state.md)). The three-node baseline,
-which the TP3 profiles keep, is recorded in
-[manifests/baselines/2026-10-05-karmic-kraken-r6.json](manifests/baselines/2026-10-05-karmic-kraken-r6.json)
-([promotion record](experiments/2026-10-05-tilelang-r6/README.md)):
+The baseline for both shapes is
+[manifests/baselines/2026-10-11-karmic-kraken-r6f.json](manifests/baselines/2026-10-11-karmic-kraken-r6f.json)
+([promotion record](experiments/2026-10-11-r6f/README.md); see
+[docs/current-state.md](docs/current-state.md)). The three-node deployment:
 
 - three DGX Spark nodes using tensor parallelism 3, on DGX Spark 26.09.2 with
   kernel `7.0.0-1019-nvidia-64k` (`kho=off`), signed memory-saver DKMS
@@ -104,12 +105,16 @@ which the TP3 profiles keep, is recorded in
     at decode tiles), and prefill rasterizes weights larger than L2 in panels;
   - DeepSeek's TileKernels 2.0.0 for the MoE top-k gate, the SwiGLU and
     quantization casts and mHC, with the mHC projection a TileLang kernel;
+  - TileLang kernels for RoPE, the CSA compressor and its projection, the KV
+    cache writers, the Engram gate and hash, the index-head weight scale and
+    the sparse-MLA metadata (the first port off Triton);
   - sparknet's one-shot RoCE all-reduce and all-gather, explicit and
     fail-stop;
   - L2 weight prefetch during decode (the next layer's weights and scale
     words stream into L2 while latency-bound kernels run);
-  - B12X's WO projection, RoPE, KV cache writers, compressor and BF16 GEMVs,
-    which the family does not replace yet, and its checkpoint loader;
+  - B12X's fused WO projection, the drafter's context-KV projection, the
+    Engram row lookup and the vision tower's kernels, which the family does
+    not replace yet, and its checkpoint loader;
 - B12X, with all its fixes, as the alternative backend in the same image: its
   FP4 KV writer rounds like DeepSeek's reference quantizer, its indexer top-k
   breaks score ties by position, its dense GEMM and prefill kernels fence
@@ -124,8 +129,17 @@ which the TP3 profiles keep, is recorded in
   its BF16 weights, and the embedding and output head live in the GB10
   display carve-out, loaded there directly from the checkpoint while the
   text console keeps its framebuffer;
+- arithmetic at DeepSeek's reference precision (`inference/model.py`): FP32
+  logits from the packed head, the mHC stream projection in FP32 (each FP32
+  weight split into three exact TF32 parts), the shared expert's SwiGLU in
+  FP32 with one rounding, and MoE partials rounded once per rank with the
+  shared expert added in the combine; WO-A's FP8 activations are the known
+  deviation left;
 - every row's result is independent of its batch: each kernel adds its
-  reduction in a fixed order, decode and prefill alike;
+  reduction in a fixed order, the collectives add every rank's partial in rank
+  order with one FP32 rounding, prefill chunks leave room for every stream's
+  decode and draft rows, and a step that mixes decode and prefill runs sparse
+  MLA per request, so decode rows keep the decode plan;
 - the ratio-2 compressor carries its open pair across decode steps, so
   compressed entries for generated tokens match the ones prefill builds;
 - DSpark speculative decoding with five draft tokens (the drafter's trained
@@ -160,15 +174,40 @@ To reproduce the deployment on your own Sparks, follow
 
 ## Performance
 
-r6d's deployed TP4 service (2026-10-10 20:00-20:16 UTC, same `bin/spark bench`
-protocol, against r6's TP4 run;
-[report](manifests/benchmarks/2026-10-10-karmic-kraken-r6d-tp4.json)): quality
-5/5; one-stream prose / code steps 31.59 / 34.65 ms (r6 31.79 / 34.75, level);
-source-text prefill 5,755 / 5,426 / 5,026 / 4,334 tok/s at 32K / 256K / 500K /
-1M (r6 5,836 / 5,471 / 5,072 / 4,370, level within the intervals). Its
-concurrent decode points send one prompt to every stream, which a deterministic
-build routes alike, so their apparent gains (+18% to +62%) are not kernel gains;
-see the [promotion record](experiments/2026-10-10-r6d-deterministic/README.md).
+r6f against r6d (2026-10-11), measured with the
+[release comparison](docs/lab.md#release-comparison): both releases in one
+session per topology, r6d first
+([results](experiments/2026-10-11-r6f-release-bench/README.md); reports for
+[TP4](manifests/benchmarks/2026-10-11-karmic-kraken-r6f-tp4.json) and
+[TP3](manifests/benchmarks/2026-10-11-karmic-kraken-r6f.json)). Each change is
+shown with its combined 95% interval and counts (**bold**) only beyond it.
+
+| Workload | TP4 r6d | TP4 r6f | TP3 r6d | TP3 r6f |
+| --- | ---: | ---: | ---: | ---: |
+| Temperature 0, 15 streams + a long prompt (requests differing) | 14 of 16 | **0 of 16** | 0 of 16 | 0 of 16 |
+| Quality gate | 5/5 | 5/5 | 5/5 | 5/5 |
+| Source-text prefill, 32K (tok/s) | 5,780 | 5,842 (**+1.1%** ±1.0) | 4,377 | 4,346 (-0.7%) |
+| Prefill, 128K | 5,634 | 5,763 (**+2.3%** ±1.4) | 4,237 | 4,260 (+0.5%) |
+| Prefill, 256K | 5,398 | 5,490 (**+1.7%** ±0.3) | 4,060 | 4,068 (+0.2%) |
+| Prefill, 512K (TP3 500K) | 4,989 | 5,064 (**+1.5%** ±0.4) | 3,770 | 3,774 (+0.1%) |
+| Prefill, 1M | 4,321 | 4,377 (**+1.3%** ±0.2) | | |
+| Decode, 1 stream, 16 prompts paired | | -0.1% ±2.4 | | -1.9% ±2.1 |
+| Decode, 4 different prompts at once (tok/s) | 132.1 | 133.1 (+0.7% ±2.4) | 107.3 | 104.0 (**-3.1%** ±0.2) |
+| Decode, 8 different prompts at once | 175.8 | 175.4 (-0.2% ±1.1) | 136.1 | 135.0 (-0.8% ±1.0) |
+| Decode, 16 different prompts at once | 222.1 | 218.0 (**-1.8%** ±0.6) | | |
+
+The reference-precision arithmetic makes each step 1-5% more expensive at a
+fixed batch size (real-row cost profiles of both releases), more on three
+nodes, where each rank holds a third of the vocabulary and experts. The pieces
+that leave the bits unchanged (the sequence-parallel overlap, the fused sum,
+the rank-order collectives and the new TileLang kernels) recover most of it:
+on four nodes prefill is faster at every size and decode is level, or within
+2% at sixteen streams. The bench's concurrent decode points send one prompt to
+every stream, so they follow the text, which a precision change alters; the
+release comparison judges throughput on different prompts at once and on the
+paired sweep. The r6f arms mounted r6f's sources on the r6d image; the
+promoted image builds the same vLLM tree and reproduces their temperature-0
+references.
 
 The r6 acceptance benchmark (2026-10-05, `bin/spark bench` from dgx1:
 quality, then prose and code prompts with reasoning on, temperature 0, 256
