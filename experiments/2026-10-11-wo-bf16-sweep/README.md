@@ -24,3 +24,14 @@ The WO tests, then [sweep_wo_a.py](sweep_wo_a.py):
 
 The result chooses the tiles, or shows that WO-A needs split-K (a fixed shard count at
 every row count, so a row's bits do not depend on the batch) to reach B12X.
+
+### Window 1 (2026-10-11, 12:21 UTC)
+
+The WO tests passed (9), so the kernel without warp specialization is correct, but the
+sweep gave no timings.
+- One config made an illegal memory access. It poisoned the process's CUDA context,
+  every later launch failed, and the repeatability check raised the sticky error.
+- Several 16-wide tiles cannot be partitioned over four warps; TileLang refuses them.
+
+Window 2 ([w2.json](w2.json)) runs every config in its own process, so a bad config is
+named and loses only itself.
