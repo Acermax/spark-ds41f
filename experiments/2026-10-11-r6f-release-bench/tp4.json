@@ -1,0 +1,130 @@
+{
+  "experiment": "experiments/2026-10-11-r6f-release-bench",
+  "run": "r6f-release-tp4",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "measure",
+      "bracket": false,
+      "bench_args": [
+        "--suites",
+        "quality,decode,prefill",
+        "--min-samples",
+        "5",
+        "--max-samples",
+        "10",
+        "--precision",
+        "2",
+        "--concurrency",
+        "1,2,4,8,16",
+        "--decode-cases",
+        "prose,code",
+        "--prefill-text",
+        "source",
+        "--prefill-sizes",
+        "1024,32768,131072,262144,524288,1000000",
+        "--prefill-repeats",
+        "2",
+        "--compare",
+        "none"
+      ],
+      "extras": [
+        [
+          "experiments/2026-10-09-tilelang-migration/token_determinism.py",
+          [
+            "--tokens",
+            "192",
+            "--long-lines",
+            "700",
+            "--wide"
+          ],
+          "determinism"
+        ],
+        [
+          "scripts/acceptance_sweep.py",
+          [
+            "--tokens",
+            "256"
+          ],
+          "sweep"
+        ],
+        [
+          "scripts/distinct_streams.py",
+          [
+            "--streams",
+            "1",
+            "--samples",
+            "3",
+            "--tokens",
+            "256"
+          ],
+          "c1-distinct"
+        ],
+        [
+          "scripts/distinct_streams.py",
+          [
+            "--streams",
+            "4",
+            "--samples",
+            "3",
+            "--tokens",
+            "256"
+          ],
+          "c4-distinct"
+        ],
+        [
+          "scripts/distinct_streams.py",
+          [
+            "--streams",
+            "8",
+            "--samples",
+            "4",
+            "--tokens",
+            "256"
+          ],
+          "c8-distinct"
+        ],
+        [
+          "scripts/distinct_streams.py",
+          [
+            "--streams",
+            "16",
+            "--samples",
+            "4",
+            "--tokens",
+            "256"
+          ],
+          "c16-distinct"
+        ],
+        [
+          "experiments/2026-09-29-determinism/ttft_short.py",
+          [
+            "--reps",
+            "3"
+          ],
+          "ttft"
+        ],
+        [
+          "experiments/2026-09-29-determinism/mixed_latency.py",
+          [
+            "--rounds",
+            "3"
+          ],
+          "mixed"
+        ]
+      ],
+      "arms": [
+        {
+          "config": "experiments/2026-10-10-r6d-deterministic/r6d-tp4.json",
+          "label": "r6d"
+        },
+        {
+          "config": "experiments/2026-10-11-attn-split/r6f-split.json",
+          "label": "r6f"
+        }
+      ]
+    }
+  ]
+}
