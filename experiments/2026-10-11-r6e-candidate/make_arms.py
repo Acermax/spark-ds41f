@@ -43,6 +43,15 @@ def main():
         [f"{{home}}/projects/spark-ds41f/{REL}/overlay/r6e/{path}", f"{TREE}/{path}", "ro"] for path in files]
     cluster["environment"]["VLLM_DS41_HEAD_DTYPE"] = "float32"
     (HERE / "r6e.json").write_text(json.dumps(cluster, indent=2) + "\n")
+    # The candidate without DSpark's adaptive verification (every draft token verified):
+    # all-reduce window 4 found the last mixed15 difference needs it on.
+    fixed = json.loads(json.dumps(cluster))
+    at = fixed["serve_args"].index("--speculative-config") + 1
+    speculative = json.loads(fixed["serve_args"][at])
+    speculative["enable_adaptive_verification"] = False
+    speculative.pop("adaptive_verification_cost_scale", None)
+    fixed["serve_args"][at] = json.dumps(speculative, separators=(",", ":"))
+    (HERE / "r6e-fixed.json").write_text(json.dumps(fixed, indent=2) + "\n")
     bundle = HERE / "bundles" / "r6e"
     bundle.mkdir(parents=True, exist_ok=True)
     mounts = []
