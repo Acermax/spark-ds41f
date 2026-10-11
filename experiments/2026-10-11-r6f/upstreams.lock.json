@@ -360,5 +360,5 @@
       "role": "ConnectX-7 hardware forwarding for a four-node switchless ring; network mechanism only"
     }
   },
-  "source_manifest": "experiments/2026-10-10-r6d-deterministic/source.json"
+  "source_manifest": "experiments/2026-10-11-r6f/source.json"
 }
