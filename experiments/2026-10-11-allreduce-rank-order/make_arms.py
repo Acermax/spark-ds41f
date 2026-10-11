@@ -42,6 +42,10 @@ def main():
     sync = json.loads(json.dumps(cluster))
     sync["environment"]["SPARK3_ENGRAM_ASYNC"] = "0"
     (HERE / "allreduce-sync.json").write_text(json.dumps(sync, indent=2) + "\n")
+    # Window 3's bisect: the same arm without CUDA graphs (decode steps unpadded, eager).
+    eager = json.loads(json.dumps(cluster))
+    eager["serve_args"] = [*eager["serve_args"], "--enforce-eager"]
+    (HERE / "allreduce-eager.json").write_text(json.dumps(eager, indent=2) + "\n")
     bundle = HERE / "bundles" / "allreduce"
     bundle.mkdir(parents=True, exist_ok=True)
     mounts = []
