@@ -577,6 +577,33 @@ class StreamTest(unittest.TestCase):
         self.assertIsNotNone(result["error"])
 
 
+class BenchAbortCleanupTest(unittest.TestCase):
+    """An aborted live bench still stops its fan curve and saves its report."""
+
+    def test_aborted_bench_saves_its_report_with_and_without_fan_control(self) -> None:
+        for fan_control in (True, False):
+            with self.subTest(fan_control=fan_control), tempfile.TemporaryDirectory() as tmp:
+                cluster = spark.read_json("config/cluster-tp4.json")
+                cluster["host"]["fan_control"] = fan_control
+                nodes = spark.read_json("config/examples/nodes-ring4.json")
+                options = spark.parser().parse_args(
+                    ["--cluster-config", "config/cluster-tp4.json", "bench", "--compare", "none", "--output", tmp])
+                identity = {"live_warnings": [], "live_problems": []}
+                bench = mock.Mock(discarded=[])
+                bench.memory.thermal_summary.return_value = {}
+                bench.memory.close.return_value = {}
+                with mock.patch.object(spark, "configuration", return_value=(cluster, nodes, {})), \
+                        mock.patch.object(spark, "bench_identity", return_value=identity), \
+                        mock.patch.object(spark, "Bench", return_value=bench), \
+                        mock.patch.object(spark, "cool_nodes", side_effect=RuntimeError("no zone")), \
+                        mock.patch.object(spark, "run_ssh", side_effect=AssertionError("contacted a node")), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    status = options.func(options)
+                self.assertEqual(status, 1)
+                report = json.loads((Path(tmp) / "bench.json").read_text())
+                self.assertEqual(report["aborted"], "cooling failed: no zone")
+
+
 class ReferenceShapeTest(unittest.TestCase):
     TP3_REFERENCE = "manifests/benchmarks/2026-10-11-karmic-kraken-r6f.json"
     TP4_REFERENCE = "manifests/benchmarks/2026-10-11-karmic-kraken-r6f-tp4.json"
