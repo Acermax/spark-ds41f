@@ -121,29 +121,36 @@ def main():
         on_nodes(nodes, f"cd {directory} && for f in rank*.jsonl; do [ -e \"$f\" ] && mv \"$f\" {phase}-\"$f\"; done; true")
         phases[phase] = read_logs(nodes, directory, phase)
     on_nodes(nodes, f"rm -f {directory}/spec.json")
-    summary, ambiguous = [], set()
+    summary, ambiguous = [], {}
     for position, token in targets:
         per = {}
         for phase, rows in phases.items():
             mine = [r for r in rows if r["pos"] == position and r["tok"] == token]
-            # The last step that computed this row (verification may repeat it).
+            # The last step that computed this row (verification may repeat it), per
+            # recording model and label.
             last, seen = {}, {}
             for r in mine:
-                last[r["label"]] = r
-                key = (r["step"], r["label"], r.get("rank"))
-                seen[key] = seen.get(key, 0) + 1
+                label = (r.get("model", 0), r["label"])
+                last[label] = r
+                seen.setdefault((r.get("model", 0), r["step"], r["label"], r.get("rank")), []).append(r["row"])
             per[phase] = last
-            if any(count > 1 for count in seen.values()):
-                ambiguous.add((position, token, phase))
+            for (model, step, label, rank), indices in seen.items():
+                if len(indices) > 1:
+                    ambiguous.setdefault((position, token), {})[phase] = {
+                        "model": model, "step": step, "label": label, "rank": rank, "rows": indices}
         labels = [label for label in per["alone"] if label in per["mixed"]]
         first = next((label for label in labels
                       if per["alone"][label]["digests"] != per["mixed"][label]["digests"]), None)
         row = {"pos": position, "tok": token, "prompt_row": position < prompt_len,
-               "labels_compared": len(labels), "first_difference": first,
-               "ambiguous": sorted(phase for p, t, phase in ambiguous if (p, t) == (position, token))}
+               "labels_compared": len(labels),
+               "first_difference": None if first is None else f"model{first[0]}:{first[1]}",
+               "ambiguous": ambiguous.get((position, token), {})}
         if first is not None:
             row["alone_rows"] = per["alone"][first]["rows"]
             row["mixed_rows"] = per["mixed"][first]["rows"]
+            # Every label at and after the first difference, in order: where it spreads.
+            row["differing"] = [f"model{m}:{lab}" for m, lab in labels[labels.index(first):]
+                                if per["alone"][(m, lab)]["digests"] != per["mixed"][(m, lab)]["digests"]][:12]
         summary.append(row)
         print(json.dumps(row), flush=True)
     print(json.dumps({"summary": "row trace", "prompt": args.prompt, "prompt_tokens": prompt_len,

@@ -84,3 +84,48 @@ debug row trace (vLLM `r6e-trace` `362b78b80`, VLLM_DS41_ROW_TRACE_DIR).
   parallelism holds.
 
 Window 3 ([w3.json](w3.json)) reruns the trace session alone on the fixed trace.
+
+### Window 3 results (2026-10-11, 15:13-15:14 UTC)
+
+Prompt 4 is 18 tokens; the trace covers rows 12-23.
+
+| rows | first difference | step rows alone / mixed |
+|---|---|---|
+| 12-14 (prompt) | none | - |
+| 15-17 (prompt) | layer 0, ambiguous in both phases | 18 / 250 |
+| 18 | layer 0, ambiguous in mixed | 6 / 90 |
+| 19-20 | none | - |
+| 21 | **layer 1** | 6 / 6814 |
+| 22-23 | layer 2 | 6 / 6814 |
+
+All-reduce window 4's trace of prompt 11 showed the same unambiguous pattern: row 21
+first differed at layer 1 inside an 8186-row mixed step, row 22 at layer 2.
+- A decode row inside a large mixed (sequence-parallel prefill) step is identical
+  through layer 0, then differs after layer 1.
+- The next rows differ from layer 2 on, as their attention reads the first row's
+  changed layer-2 KV.
+
+Layers 0 and 1 are both sliding-window layers without compression (compress ratio 0).
+Layer 1 alone adds Engram (`engram_layer_ids` = [1, 14]). So the batch dependence is in
+the Engram path for a decode row in a large step:
+- the hash of its n-gram;
+- the staged table rows and their all-reduce;
+- the `wkv` projection;
+- the gate.
+
+The gate kernel is row-local (one block per token and stream, a fixed launch). `wkv` is
+the TileLang FP8 linear that every layer uses. The all-reduce has one nonzero
+contributor per element.
+
+The ambiguous rows had two matching records in one step and label. The drafter does
+not record (it is another model class), so another row shares their position and
+token there. Window 4 reports which rows.
+
+## Window 4 ([w4.json](w4.json))
+
+The trace session again, on vLLM `c2615923f`:
+- lines carry the recording model;
+- Engram layers record every token's hash ids, staged rows (after the all-reduce),
+  projection, and this rank's gated rows (`engram1_hash`, `_rows`, `_kv`, `_out`);
+- the session keys labels by model, lists each row's differing labels in order, and
+  names the colliding rows of an ambiguous match.

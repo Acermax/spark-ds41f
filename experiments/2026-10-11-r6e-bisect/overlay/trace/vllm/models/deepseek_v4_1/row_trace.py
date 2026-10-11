@@ -14,6 +14,7 @@ device, so traced runs are slow; use them only to localize a difference.
 """
 
 import hashlib
+import itertools
 import json
 import os
 
@@ -21,6 +22,9 @@ import torch
 
 DIR = os.environ.get("VLLM_DS41_ROW_TRACE_DIR")
 ENABLED = bool(DIR)
+_INSTANCES = itertools.count()
+# The trace of the forward in progress, for sublayers (Engram) to record into.
+ACTIVE: "RowTrace | None" = None
 
 
 def _digest(row: torch.Tensor) -> str:
@@ -35,6 +39,7 @@ class RowTrace:
         os.makedirs(DIR, exist_ok=True)
         os.chmod(DIR, 0o777)  # the host side writes spec.json and renames logs
         self.rank, self.step, self.mtime = rank, 0, None
+        self.model = next(_INSTANCES)  # which model of the process recorded a line
         self.targets: set[tuple[int, int]] = set()
         self.matched: dict[int, tuple[int, int]] = {}
         self.rows = 0
@@ -54,6 +59,8 @@ class RowTrace:
                 self.targets = {(int(p), int(t)) for p, t in json.load(f)["rows"]}
 
     def begin(self, positions: torch.Tensor, input_ids: torch.Tensor | None) -> None:
+        global ACTIVE
+        ACTIVE = self
         self.step += 1
         self._reload()
         if not os.path.exists(self.path):  # renamed away by the host: a new phase
@@ -88,6 +95,7 @@ class RowTrace:
             self.out.write(
                 json.dumps(
                     {
+                        "model": self.model,
                         "step": self.step,
                         "label": label,
                         "pos": position,

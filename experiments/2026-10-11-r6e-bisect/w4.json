@@ -1,0 +1,34 @@
+{
+  "experiment": "experiments/2026-10-11-r6e-bisect",
+  "run": "r6e-bisect-w4",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "measure",
+      "bench": false,
+      "bracket": false,
+      "extras": [
+        [
+          "row_trace_session.py",
+          [
+            "--prompt",
+            "4",
+            "--around",
+            "4",
+            "--prompt-rows",
+            "6"
+          ],
+          "trace"
+        ]
+      ],
+      "arms": [
+        {
+          "config": "r6e-trace.json",
+          "label": "trace"
+        }
+      ]
+    }
+  ]
+}
