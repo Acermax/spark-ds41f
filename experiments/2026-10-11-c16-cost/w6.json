@@ -1,0 +1,33 @@
+{
+  "experiment": "experiments/2026-10-11-c16-cost",
+  "run": "allgather-w6",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "measure",
+      "bench": false,
+      "bracket": false,
+      "extras": [],
+      "arms": [
+        {
+          "config": "w6-r6f.json",
+          "label": "r6f"
+        },
+        {
+          "config": "w6-ag4m.json",
+          "label": "ag4m"
+        },
+        {
+          "config": "w6-ag8m.json",
+          "label": "ag8m"
+        },
+        {
+          "config": "w6-r6f-again.json",
+          "label": "r6f-again"
+        }
+      ]
+    }
+  ]
+}
