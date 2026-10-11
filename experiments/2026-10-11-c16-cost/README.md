@@ -16,3 +16,8 @@ r6d and r6f booted without pinned curves and with real-row profiling
 draft step cost at fixed token counts; the table puts them side by side. Where r6f's
 verify cost leaves r6d's names the step size, and a torch profile there names the
 kernel.
+
+Window 1 (17:24-17:28 UTC) wrote no curves: a boot without a cost directory profiles
+but neither logs nor saves the curves. Window 2 ([w2.json](w2.json)) gives each arm an
+empty cost directory (`/cache/kkref/dspark-costs/c16-<arm>-20261011`). The boot then
+profiles and pins its curves there: draft, verify, and verify per request count.

@@ -263,7 +263,8 @@
     "VLLM_USE_STANDALONE_COMPILE": "1",
     "VLLM_USE_V2_MODEL_RUNNER": "1",
     "XDG_CACHE_HOME": "/cache/kkref/jit",
-    "SPARK3_DSPARK_PROFILE_TOKENS": "random"
+    "SPARK3_DSPARK_PROFILE_TOKENS": "random",
+    "SPARK3_DSPARK_COST_DIR": "/cache/kkref/dspark-costs/c16-r6f-20261011"
   },
   "serve_args": [
     "/models",
