@@ -107,6 +107,7 @@ class DeepseekV4DecoderLayer(nn.Module):
         config = vllm_config.model_config.hf_config
         self.hidden_size = config.hidden_size
         self.use_sequence_parallel = _use_sequence_parallel(vllm_config)
+        self._trace_index = extract_layer_index(prefix)  # debug row trace labels
 
         self.engram: Engram | None = None
         if engram_layout is not None:
@@ -295,6 +296,16 @@ class DeepseekV4DecoderLayer(nn.Module):
         ced_indices: torch.Tensor | None = None,
         sp_rows: sp_prefill.SPRows | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        trace = row_trace.ACTIVE if row_trace.ENABLED else None
+        if trace is not None:  # debug only: this layer's stages, local rows under SP
+            trace.layer = self._trace_index
+            local = (0, None)
+            if sp_rows is not None:
+                local = (sp_rows.start, sp_rows.local_rows)
+
+            def mark(stage, *tensors):
+                trace.record(f"L{self._trace_index}_{stage}", tensors, *local)
+
         previous_output = x if residual is not None else None
         apply_engram = self.engram is not None and engram_hashes is not None
         if residual is None:
@@ -314,6 +325,8 @@ class DeepseekV4DecoderLayer(nn.Module):
                 engram_mask,
                 sp_rows=sp_rows,
             )
+        if trace is not None and previous_output is None:
+            mark("resid_in", residual)
         fn = self.hc_attn_fn_broadcast if residual.ndim == 2 else self.hc_attn_fn
         residual, post_mix, res_mix, x, attn_pre = self.mhc.pre(
             residual,
@@ -326,6 +339,8 @@ class DeepseekV4DecoderLayer(nn.Module):
             previous_post=post_mix if previous_output is not None else None,
             previous_comb=res_mix if previous_output is not None else None,
         )
+        if trace is not None:
+            mark("attn_in", x, residual)
         global_kv_ready = None
         if ced_indices is not None:
             # Decoder global KV needs every encoder row, but decoder queries,
@@ -347,6 +362,8 @@ class DeepseekV4DecoderLayer(nn.Module):
                 x = self.attn(positions, x, None, global_kv_ready=global_kv_ready)
             if sp_rows.unreduced:
                 x = sp_prefill.unreduced_parts(x)
+        if trace is not None:
+            mark("attn_out", x)
         residual, post_mix, res_mix, x, ffn_pre = self.mhc.post_pre(
             x,
             residual,
@@ -358,6 +375,8 @@ class DeepseekV4DecoderLayer(nn.Module):
             self.ffn_norm.weight,
             attn_pre,
         )
+        if trace is not None:
+            mark("ffn_in", x, residual)
         if sp_rows is None:
             x = self.ffn(x, input_ids)
         else:
