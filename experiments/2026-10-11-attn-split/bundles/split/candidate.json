@@ -1,0 +1,109 @@
+{
+  "description": "The MoE tests on the r6f-split tree, in the r6d image (a smoke check that the stack imports).",
+  "image": "vllm-ds41f-kkref:19f2c20ed4d6-r6d",
+  "env": {
+    "HF_HUB_OFFLINE": "1"
+  },
+  "workdir": "/opt/spark3/candidate/vllm",
+  "argv": [
+    "-m",
+    "pytest",
+    "-q",
+    "--noconftest",
+    "-p",
+    "no:cacheprovider",
+    "-rfE",
+    "tests/kernels/moe/test_deepseek_v41_tilelang_moe.py"
+  ],
+  "verdict": "exit",
+  "mounts": [
+    [
+      "vllm__distributed__device_communicators__cuda_communicator.py",
+      "/opt/spark3/candidate/vllm/vllm/distributed/device_communicators/cuda_communicator.py"
+    ],
+    [
+      "vllm__model_executor__layers__fused_moe__fused_moe_method_base.py",
+      "/opt/spark3/candidate/vllm/vllm/model_executor/layers/fused_moe/fused_moe_method_base.py"
+    ],
+    [
+      "vllm__model_executor__layers__fused_moe__runner__moe_runner.py",
+      "/opt/spark3/candidate/vllm/vllm/model_executor/layers/fused_moe/runner/moe_runner.py"
+    ],
+    [
+      "vllm__model_executor__layers__fused_moe__runner__shared_experts.py",
+      "/opt/spark3/candidate/vllm/vllm/model_executor/layers/fused_moe/runner/shared_experts.py"
+    ],
+    [
+      "vllm__model_executor__layers__fused_moe__tilelang.py",
+      "/opt/spark3/candidate/vllm/vllm/model_executor/layers/fused_moe/tilelang.py"
+    ],
+    [
+      "vllm__model_executor__layers__logits_processor.py",
+      "/opt/spark3/candidate/vllm/vllm/model_executor/layers/logits_processor.py"
+    ],
+    [
+      "vllm__model_executor__layers__quantization__online__packed_bf16.py",
+      "/opt/spark3/candidate/vllm/vllm/model_executor/layers/quantization/online/packed_bf16.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__attention.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/attention.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__compressor.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/compressor.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__kernels.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/kernels.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__nvidia__model.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/nvidia/model.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__sp_prefill.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/sp_prefill.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__sparse_mla.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/sparse_mla.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__tilelang__activation.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/activation.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__tilelang__cache_writer.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/cache_writer.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__tilelang__collectives.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/collectives.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__tilelang__compress.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/compress.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__tilelang__metadata.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/metadata.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__tilelang__mhc.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/mhc.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__tilelang__moe.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/moe.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__tilelang__vocab.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/vocab.py"
+    ],
+    [
+      "tests__kernels__moe__test_deepseek_v41_tilelang_moe.py",
+      "/opt/spark3/candidate/vllm/tests/kernels/moe/test_deepseek_v41_tilelang_moe.py"
+    ]
+  ]
+}
