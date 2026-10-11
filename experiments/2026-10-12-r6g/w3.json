@@ -1,0 +1,70 @@
+{
+  "experiment": "experiments/2026-10-12-r6g",
+  "run": "r6g-greedy-ab-w3",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "measure",
+      "bench": false,
+      "bracket": false,
+      "extras": [
+        [
+          "scripts/distinct_streams.py",
+          [
+            "--streams",
+            "16",
+            "--samples",
+            "6",
+            "--tokens",
+            "256"
+          ],
+          "c16-distinct"
+        ],
+        [
+          "scripts/distinct_streams.py",
+          [
+            "--streams",
+            "8",
+            "--samples",
+            "6",
+            "--tokens",
+            "256"
+          ],
+          "c8-distinct"
+        ]
+      ],
+      "arms": [
+        {
+          "config": "w3-on.json",
+          "label": "on"
+        },
+        {
+          "config": "w3-off.json",
+          "label": "off"
+        },
+        {
+          "config": "w3-on-again.json",
+          "label": "on-again"
+        }
+      ]
+    },
+    {
+      "kind": "profile",
+      "workloads": [
+        "code16"
+      ],
+      "arms": [
+        {
+          "config": "w3-on-fixed.json",
+          "label": "on"
+        },
+        {
+          "config": "w3-off-fixed.json",
+          "label": "off"
+        }
+      ]
+    }
+  ]
+}
