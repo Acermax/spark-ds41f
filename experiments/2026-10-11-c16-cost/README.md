@@ -21,3 +21,24 @@ Window 1 (17:24-17:28 UTC) wrote no curves: a boot without a cost directory prof
 but neither logs nor saves the curves. Window 2 ([w2.json](w2.json)) gives each arm an
 empty cost directory (`/cache/kkref/dspark-costs/c16-<arm>-20261011`). The boot then
 profiles and pins its curves there: draft, verify, and verify per request count.
+
+### Window 2 results (2026-10-11, 17:30-17:34 UTC)
+
+Real-row profiles, verify step cost (ms) at fixed token counts: r6f is 1-5% above
+r6d everywhere (32: 24.04 against 24.50; 48: 29.07 against 29.70; 56: 31.37 against
+32.87; 96: 43.10 against 44.61). The draft step is 2-5% above. There is no cliff.
+
+## Torch profile of code c16 ([c16-profile](../2026-10-11-c16-profile/README.md))
+
+r6f's extra GPU time (+710 ms over 4096 tokens) is the routed-expert grouped GEMMs:
+- gate/up: 2109 against 2558 ms;
+- down: 1656 against 1938 ms.
+
+It is per call at the same launch shape. At the 48-row capture size (288 tiles) gate/up
+takes 444 µs a call on r6d and 575 on r6f. Either r6f routes more real rows inside the
+same padded step, or something now contends with these GEMMs.
+
+## Window 3 ([w3.json](w3.json))
+
+Code c16 alone (3 samples) on r6d, r6e's prefixes p1-p4 with adaptive verification on
+(the bisect arms had it off), and r6f. The first prefix that loses c16 names the piece.
