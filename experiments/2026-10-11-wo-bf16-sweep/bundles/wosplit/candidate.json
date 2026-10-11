@@ -1,0 +1,39 @@
+{
+  "description": "WO-A split-K: tests, then split against in-kernel shards over tiles, with bits.",
+  "image": "vllm-ds41f-kkref:19f2c20ed4d6-r6d",
+  "env": {
+    "HF_HUB_OFFLINE": "1"
+  },
+  "workdir": "/opt/spark3/candidate/vllm",
+  "argv": [
+    "-c",
+    "import subprocess, sys; codes = [subprocess.call([sys.executable, '-m', 'pytest', '-q', '--noconftest', '-p', 'no:cacheprovider', '-rfE', 'tests/kernels/quantization/test_deepseek_v41_tilelang_wo.py']), subprocess.call([sys.executable, '/b/sweep_wo_a_splitk.py'])]; print('exit codes', codes); sys.exit(max(codes))"
+  ],
+  "verdict": "exit",
+  "mounts": [
+    [
+      "vllm__models__deepseek_v4_1__attention.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/attention.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__tilelang__gemm.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/gemm.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__tilelang__wo.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/wo.py"
+    ],
+    [
+      "tests__kernels__quantization__test_deepseek_v41_tilelang_wo.py",
+      "/opt/spark3/candidate/vllm/tests/kernels/quantization/test_deepseek_v41_tilelang_wo.py"
+    ],
+    [
+      "kbench.py",
+      "/b/kbench.py"
+    ],
+    [
+      "sweep_wo_a_splitk.py",
+      "/b/sweep_wo_a_splitk.py"
+    ]
+  ]
+}

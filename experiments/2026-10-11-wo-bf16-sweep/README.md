@@ -55,3 +55,25 @@ Best warm (cold) times against the previous default:
 | 8192 | 1504 (1518) | 64 wide, 2 stages | 2220 |
 
 B12X's whole WO (WO-A and WO-B) takes 30.8 us at decode and 792 at 2048 rows.
+
+## Window 3
+
+WO window 4 ([wo-bf16](../2026-10-11-wo-bf16/README.md)) brought warm decode level
+with B12X with four K shards split over CTAs, but 24-512 rows stayed 1.15-1.55x slower
+and cold 6-8% slower.
+
+[w3.json](w3.json) (kernel only, `make_bundle.py --split`) runs the WO tests at vLLM
+`cec0da371`, then [sweep_wo_a_splitk.py](sweep_wo_a_splitk.py). It sweeps WO-A alone
+at 1-8192 rows, warm and cold, over these configurations, each in its own process:
+- the split path (FP32 partials, then `splitk_reduce`) up to 256 rows, at 16-64-row
+  tiles;
+- the in-kernel path at 16-128-row tiles;
+- 32- and 64-column tiles, at two and four shards.
+
+One shard count fixes a row's arithmetic, so every configuration of that count must
+give the same bits at every size; the sweep fails otherwise. It prints the three
+fastest per size and shard count, beside B12X's whole WO from window 4.
+
+The result picks the shard count and a per-bucket dispatch (path and tile). WO-B's
+share of the whole WO is not measured here; the next WO bench measures the whole
+projection again.
