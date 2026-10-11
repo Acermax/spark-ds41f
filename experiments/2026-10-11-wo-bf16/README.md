@@ -67,3 +67,19 @@ The window was closed before the serving arms. The fixes, measured in the
 Window 3 ([w3.json](w3.json), kernel only) reruns the whole-projection bench against
 B12X. At decode WO-A alone is about two thirds of B12X's whole WO, so split-K, with a
 fixed shard count at every row count, is the likely next step.
+
+### Window 3 (2026-10-11, 13:19 UTC, kernel only)
+
+- **Correctness:** repeatable at every size (0 of 200 replays differ), with error below
+  B12X's.
+- **Speed against B12X's fused WO:** 1.21-1.41x at 1-8 rows (about 34 against 25 us
+  warm), 1.00-1.26x at 12-64, 1.24-1.43x at 72-512, 0.96x at 2048, 0.70x at 8192.
+- **Why decode lags:** WO-A's 64-tile grid leaves SMs idle at decode (about 400 GB/s).
+
+vLLM `cec0da371` sums K in four shards at every row count:
+- decode rows (up to 128) give each shard its own CTA: FP32 partials, then
+  `splitk_reduce`;
+- longer steps add the shards inside the kernel in the same order.
+
+A row's bits do not depend on the path; the WO-A test compares row counts across both.
+Window 4 ([w4.json](w4.json), kernel only) reruns the bench.
