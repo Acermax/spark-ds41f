@@ -75,3 +75,19 @@ rows. Window 2 ([w2.json](w2.json), no speed bench) bisects: the arm with the 15
 check twice (does the one difference repeat in place?) and the arm with
 `SPARK3_ENGRAM_ASYNC=0` (`allreduce-sync.json`: the Engram rows read before the
 forward instead of beside it; the rows are the same, only their timing changes).
+
+Window 2 (2026-10-11, 07:41-07:55 UTC): the arm's `mixed15` twice and the arm with
+synchronous Engram reads give the same single difference every time: prompt 11,
+logprobs only, from token 7, as in window 1. It is deterministic, not a race, and not
+the asynchronous Engram reader; every other scenario stays identical and the
+references keep r6d's bits. Something computes a row with other arithmetic in some
+step shape that fifteen streams reach and eight do not.
+
+Window 3 ([w3.json](w3.json)) runs `mixed15` on the arm without CUDA graphs
+(`allreduce-eager.json`, `--enforce-eager`): graph replays pad decode steps to the
+capture sizes (90 rows to 96) and eager steps do not. If the difference goes away the
+cause is the graphs or their padding. Its second job localizes it if it stays:
+`allreduce-trace.json` (eager, with the debug row trace of vLLM `r6d-row-trace`
+`8fd502d47`, `VLLM_DS41_ROW_TRACE_DIR=/cache/row-trace`) and
+[row_trace_session.py](row_trace_session.py), which traces the rows feeding prompt
+11's tokens 4-9 alone and in mixed15 and reports the first layer whose digests differ.
