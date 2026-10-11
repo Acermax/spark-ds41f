@@ -1,0 +1,81 @@
+{
+  "experiment": "experiments/2026-10-12-r6g",
+  "run": "r6g-fold-w1",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "measure",
+      "bench": false,
+      "bracket": false,
+      "extras": [
+        [
+          "experiments/2026-10-09-tilelang-migration/token_determinism.py",
+          [
+            "--tokens",
+            "192",
+            "--long-lines",
+            "700",
+            "--wide"
+          ],
+          "determinism"
+        ],
+        [
+          "scripts/distinct_streams.py",
+          [
+            "--streams",
+            "16",
+            "--samples",
+            "4",
+            "--tokens",
+            "256"
+          ],
+          "c16-distinct"
+        ],
+        [
+          "scripts/distinct_streams.py",
+          [
+            "--streams",
+            "8",
+            "--samples",
+            "4",
+            "--tokens",
+            "256"
+          ],
+          "c8-distinct"
+        ]
+      ],
+      "arms": [
+        {
+          "config": "r6f.json",
+          "label": "r6f"
+        },
+        {
+          "config": "fold.json",
+          "label": "fold"
+        },
+        {
+          "config": "r6f-again.json",
+          "label": "r6f-again"
+        }
+      ]
+    },
+    {
+      "kind": "profile",
+      "workloads": [
+        "code16"
+      ],
+      "arms": [
+        {
+          "config": "r6f-fixed.json",
+          "label": "r6f"
+        },
+        {
+          "config": "fold-fixed.json",
+          "label": "fold"
+        }
+      ]
+    }
+  ]
+}
