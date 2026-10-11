@@ -1,0 +1,18 @@
+{
+  "experiment": "experiments/2026-10-11-wo-bf16-sweep",
+  "run": "wo-bf16-sweep-w3",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "kernel",
+      "bundles": [
+        {
+          "node": "dgx1",
+          "bundle": "experiments/2026-10-11-wo-bf16-sweep/bundles/wosplit"
+        }
+      ]
+    }
+  ]
+}

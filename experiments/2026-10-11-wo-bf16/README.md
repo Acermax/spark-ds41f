@@ -83,3 +83,27 @@ vLLM `cec0da371` sums K in four shards at every row count:
 
 A row's bits do not depend on the path; the WO-A test compares row counts across both.
 Window 4 ([w4.json](w4.json), kernel only) reruns the bench.
+
+### Window 4 (2026-10-11, 14:00 UTC, kernel only)
+
+- **Correctness:** repeatable at every size (0 of 200 replays), no row differs from its
+  full batch, error below B12X's (0.49/0.080 against 0.68/0.114).
+- **Speed against B12X's fused WO, warm / cold:**
+
+  | rows | TileLang (us) | B12X (us) | ratio |
+  |---|---|---|---|
+  | 1-16 | 22.5-24.0 / 101-103 | 22.6-34.4 / 94-97 | 0.69-1.04 / 1.06-1.08 |
+  | 24-64 | 28.6-53.8 / 105-111 | 24.5-39.2 / 98-103 | 1.15-1.37 / 1.07-1.08 |
+  | 72-96 | 81-95 / 121-125 | 54-61 / 104-106 | 1.51-1.55 / 1.16-1.17 |
+  | 512 | 299 / 272 | 214 / 189 | 1.40 / 1.44 |
+  | 2048 | 853 / 825 | 808 / 765 | 1.06 / 1.08 |
+  | 8192 | 3348 / 3199 | 4524 / 4376 | 0.74 / 0.73 |
+
+- **Reading:** split-K brought warm decode (1-16 rows) level with B12X. Cold is still
+  6-8% slower everywhere up to 2048 rows. From 24 rows the split path is slower than
+  the unsplit kernel of the earlier sweep (WO-A alone took 43 us at 96 rows unsplit; the
+  whole WO now takes 95). The likely cost is the FP32 partials (four shards of every
+  output, written then read back: 3 MB each way at 96 rows).
+
+The [split sweep](../2026-10-11-wo-bf16-sweep/README.md#window-3) chooses, per row
+bucket, the path (split or in-kernel shards) and the tile, at two and four shards.
