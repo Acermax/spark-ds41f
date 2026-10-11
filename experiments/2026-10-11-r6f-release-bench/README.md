@@ -74,3 +74,40 @@ Reading:
 - One measured loss: 16 distinct streams, -1.8%. Real-row cost curves put r6f's
   per-step cost 1-5% above r6d's at large batches. The reference-precision pieces add
   it: FP32 head logits, the three-part FP32 mHC projection, the FP32 MoE partial path.
+
+## TP3 results (2026-10-11, 19:33-20:26 UTC, triangle)
+
+From `scripts/release_table.py r6f-release-tp3 r6d r6f`. r6f's boot and determinism on the
+triangle are the simple test of the complete solution.
+
+| metric | r6d | r6f | change | verdict |
+|---|---|---|---|---|
+| determinism (every scenario, mixed15 included) | identical | identical | | same |
+| quality | 5/5 | 5/5 | | same |
+| acceptance sweep tok/s (paired, 16 prompts) | | | -1.9% ±2.1% | same |
+| acceptance sweep accepted (paired) | | | -2.5% ±4.6% | same |
+| 1 distinct stream tok/s | 70.8 | 68.3 | -3.5% ±0.1% | **slower** |
+| 4 distinct streams | 107.3 | 104.0 | -3.1% ±0.2% | **slower** |
+| 8 distinct streams | 136.1 | 135.0 | -0.8% ±1.0% | same |
+| prefill 1K tok/s | 2153 | 2281 | +5.9% ±13.5% | same |
+| prefill 32K | 4377 | 4346 | -0.7% ±4.0% | same |
+| prefill 128K | 4237 | 4260 | +0.5% ±0.7% | same |
+| prefill 256K | 4060 | 4068 | +0.2% ±0.4% | same |
+| prefill 500K | 3770 | 3774 | +0.1% ±0.2% | same |
+| short-prompt TTFT ms | 114.8 | 119.3 | +3.9% | slower (no interval) |
+| mixed short / long TTFT ms | 282.5 / 1049.9 | 289.8 / 1074.3 | +2.6% / +2.3% | same (no interval) |
+| mixed stream gap p95 ms | 114.2 | 133.1 | +16.5% | slower (no interval) |
+
+The bench's single-prompt points are all faster on r6f (prose +4.7% to +13.2%, code +1.2%
+to +10.3%), with acceptance higher on every one. They follow the text.
+
+Reading:
+- On TP3, r6d was already identical in every scenario in this run, and r6f stays so.
+- Prefill is level.
+- Decode at one and four streams is about 3% slower. At eight streams and on the paired
+  sweep it is level.
+- The reference-precision work costs relatively more on three ranks than on four:
+  FP32 head logits, the three-part FP32 mHC projection, the FP32 MoE partials. Each rank
+  holds a third of the vocabulary and experts instead of a quarter.
+- The decode gains of the bit-identical pieces measured on TP4 do not cover it here.
+- The mixed-traffic p95 gap (+16.5%) has no interval and wants a repeat.
