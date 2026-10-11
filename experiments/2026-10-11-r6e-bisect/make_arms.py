@@ -24,7 +24,7 @@ REL = HERE.relative_to(ROOT).as_posix()
 BASE = ROOT / "experiments/2026-10-10-r6d-deterministic/r6d-tp4.json"
 R6D = "r6d-candidate"  # the vLLM branch of the r6d image's tree
 TREE = "/opt/spark3/candidate/vllm"
-TRACE = "362b78b80"  # r6e-draft2 + the debug row trace (VLLM_DS41_ROW_TRACE_DIR)
+TRACE = "a8b3ef9aa"  # r6e-draft2 + the debug row trace, SP parts digested by their sum
 # (label, r6e-draft2 commit, FP32 head): each prefix adds one piece.
 PREFIXES = [
     ("p1-allreduce", "a0d2d1fd1", False),  # SP WO slices, fused SP sum, rank-order all-reduce

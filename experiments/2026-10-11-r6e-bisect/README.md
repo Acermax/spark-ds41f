@@ -72,3 +72,15 @@ debug row trace (vLLM `r6e-trace` `362b78b80`, VLLM_DS41_ROW_TRACE_DIR).
    - generated rows from the first;
    - records tagged by rank;
    - rows that another prompt's row also matches in a step marked ambiguous.
+
+### Window 2 results (2026-10-11, 15:00-15:07 UTC)
+
+- **Eager:** the difference survives without CUDA graphs. Prompt 4 differs in mixed and
+  mixed15 (logprobs from token 4, tokens from token 11), with r6e's references.
+- **Trace:** the session's mixed15 phase took the server down. The trace indexed a
+  sequence-parallel layer's unreduced parts (`RankOrderParts`) as a tensor and raised
+  on rank 2. The other ranks then timed out in sparknet's relay (5 s). vLLM `a8b3ef9aa`
+  digests such parts by their rank-order sum, the value a step without sequence
+  parallelism holds.
+
+Window 3 ([w3.json](w3.json)) reruns the trace session alone on the fixed trace.
