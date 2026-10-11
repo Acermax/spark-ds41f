@@ -35,3 +35,23 @@ sweep gave no timings.
 
 Window 2 ([w2.json](w2.json)) runs every config in its own process, so a bad config is
 named and loses only itself.
+
+### Window 2 (2026-10-11, 12:48 UTC)
+
+- **Bits and repeatability:** every config gave the default config's bits at every
+  size. The default config was repeatable: 0 of 200 replays differ at 1-48 rows.
+- **16-column tiles:** they crashed. A 16-wide tile has no 32-row scale block, so the
+  decode read out of bounds; vLLM `50f6f886d` rejects them.
+
+Best warm (cold) times against the previous default:
+
+| rows | best | config | previous default |
+|---|---|---|---|
+| 1-16 | 19.5-19.9 (49-53) us | 32 wide, 2-4 stages, 128 threads | 19.7-20.0 |
+| 48 | 28.7 (55.6) | 32 wide, 2 stages | 33.5 |
+| 96 | 43.3 (59.4) | 32 wide, 2 stages | 48.8 |
+| 512 | 140 (150) | 64 wide, 2 stages | 152 |
+| 2048 | 399 (412) | 64 wide, 2 stages | 548 |
+| 8192 | 1504 (1518) | 64 wide, 2 stages | 2220 |
+
+B12X's whole WO (WO-A and WO-B) takes 30.8 us at decode and 792 at 2048 rows.
