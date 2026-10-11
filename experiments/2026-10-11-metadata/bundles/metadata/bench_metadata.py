@@ -3,7 +3,7 @@ ones, at TP4's capacity (8192 tokens, 16 requests).
 
 The builder's request and token metadata launch eagerly before each forward, so their
 time is host launch plus GPU work, measured to the end of the GPU work; the attention
-layer's window and page metadata run inside the decode graphs, so their time is GPU
+layer's window and page metadata (one fused TileLang launch against Triton's two) run inside the decode graphs, so their time is GPU
 time per call under CUDA graphs, warm and cold.
 
 1. Bits: every output equals the Triton kernel's.
@@ -92,9 +92,9 @@ for name, lengths in STEPS.items():
             _pages[(rows, triton.cdiv(MAIN_WIDTH, 128))](o["reqs"], table, o["pages"], 0, table.stride(0),
                                                          table.shape[1], MAIN_WIDTH, 128)
         else:
-            tl.chunk(o["pos"], o["reqs"], table, o["swa"], o["lengths"], o["top"], o["visible"], qsl, o["rpos"], 0,
-                     rows, page=PAGE, window=WINDOW, draft=False)
-            tl.pages(o["reqs"], table, o["pages"], 0, rows, table.shape[1])
+            tl.decode_metadata(o["pos"], o["reqs"], table, o["swa"], o["lengths"], o["top"], o["visible"], qsl,
+                               o["rpos"], o["reqs"], table, o["pages"], 0, rows, table.shape[1], page=PAGE,
+                               window=WINDOW, draft=False)
 
     for impl, o in outs.items():
         build(impl, o)

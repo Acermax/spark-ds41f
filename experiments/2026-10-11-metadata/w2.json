@@ -1,0 +1,18 @@
+{
+  "experiment": "experiments/2026-10-11-metadata",
+  "run": "metadata-w2",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "kernel",
+      "bundles": [
+        {
+          "node": "dgx1",
+          "bundle": "experiments/2026-10-11-metadata/bundles/metadata"
+        }
+      ]
+    }
+  ]
+}

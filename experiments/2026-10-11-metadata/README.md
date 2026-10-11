@@ -31,3 +31,17 @@ kernels.
    exact, so outputs and references must equal r6d's.
 
 Acceptance: identical outputs to r6d; the bench no slower than Triton anywhere.
+
+### Window 1 kernel results (2026-10-11, 11:45 UTC)
+
+All 70 tests passed: every output identical to Triton's.
+
+- **Builder metadata (eager, host launch included):** 15-21% faster than Triton at
+  every step (about 17.5 against 21 us).
+- **Layer metadata under graphs:** the window and page kernels were 0.2-0.4 us slower
+  than Triton's pair at decode (2.3-2.5 against 1.9-2.3 us) and up to 17% slower at
+  2048-row prefill.
+
+The decode metadata writes both for the same rows back to back, so the follow-up
+(vLLM, top of `r6d-metadata`) writes them in one launch. Window 2
+([w2.json](w2.json)) is the kernel bundle again, kernel only.
