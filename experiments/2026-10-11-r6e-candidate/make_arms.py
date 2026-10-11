@@ -17,7 +17,7 @@ ROOT = HERE.parents[1]
 REL = HERE.relative_to(ROOT).as_posix()
 BASE = ROOT / "experiments/2026-10-10-r6d-deterministic/r6d-tp4.json"
 R6D = "r6d-candidate"  # the vLLM branch of the r6d image's tree
-ARM = "d0815e76b"  # r6e-draft: the stack and the FP32 MoE parts reaching mHC unrounded
+ARM = "1e9ac8c16"  # r6e-draft2: the stack with B4, T1 and MoE one rounding; no WO-BF16, no B10
 TREE = "/opt/spark3/candidate/vllm"
 EXTRA_TESTS = ["tests/kernels/test_deepseek_v41_tilelang_cache_writer.py"]
 

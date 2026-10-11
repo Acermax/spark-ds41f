@@ -53,15 +53,15 @@ def embedding_method():
 
 
 def moe_output_dtype() -> torch.dtype:
-    """The routed experts' output: FP32 keeps each rank's combined expert sum, the
-    shared expert's add and the cross-rank sum unrounded until the layer output,
-    as DeepSeek's reference accumulates expert outputs in FP32; BF16 rounds at
-    the combine."""
-    return torch.float32 if MOE_FP32_PARTIALS and uses_tilelang() else torch.bfloat16
+    """The routed experts' output. FP32 keeps the routes' combined sum unrounded,
+    so the rank's partial (shared expert added in FP32) rounds once before the
+    cross-rank sum, as DeepSeek's row-parallel linears round theirs; BF16 rounds
+    at the combine and again at the shared add."""
+    return torch.float32 if MOE_FP32_COMBINE and uses_tilelang() else torch.bfloat16
 
 
-# The MoE partials stay FP32 until the layer output under the TileLang family.
-MOE_FP32_PARTIALS = True
+# The MoE combine stays FP32 until the rank's partial rounds, under the TileLang family.
+MOE_FP32_COMBINE = True
 
 
 def shared_expert_activation(act_fn: nn.Module) -> nn.Module:

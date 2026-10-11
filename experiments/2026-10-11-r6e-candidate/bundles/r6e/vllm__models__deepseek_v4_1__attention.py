@@ -249,15 +249,15 @@ class _AttentionHelpers:
                 )
             )
         attn._helper_plans = plans
-        helpers = B12xPreparationUnit(
-            name="V41AttentionHelpers",
-            key=(attn.prefix, attn.capacity),
-            requests=tuple(requests),
-            stage="weights",
+        return (
+            B12xPreparationUnit(
+                name="V41AttentionHelpers",
+                key=(attn.prefix, attn.capacity),
+                requests=tuple(requests),
+                stage="weights",
+            ),
+            attn._wo_preparation_unit(workload),
         )
-        if kernels.uses_tilelang():  # the TileLang WO projection needs no plan
-            return (helpers,)
-        return (helpers, attn._wo_preparation_unit(workload))
 
 
 @triton.jit(do_not_specialize=["offset", "stride", "width"])
@@ -742,6 +742,36 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase):
             self._short_index_shape = (short_rows, short_width)
             specs.append(("_short_index_pages", self._short_index_shape, torch.int32))
         self._staging_specs = tuple(specs)
+        if kernels.uses_tilelang():
+            self._compile_tilelang_metadata()
+
+    def _compile_tilelang_metadata(self) -> None:
+        """Compile this layer's TileLang metadata kernels at preparation, never
+        during graph capture."""
+        from vllm.models.deepseek_v4_1.tilelang import metadata as tl_metadata
+
+        replays = (
+            (False, True) if self.is_ced_decoder and not self.is_draft else (False,)
+        )
+        for replay in replays:
+            args = (
+                self.swa_cache_layer.block_size,
+                self.window_size,
+                self.swa_width,
+                self.is_draft,
+                replay,
+            )
+            if self.compress_ratio:
+                tl_metadata.decode_metadata_kernel(*args, self._main_width)
+            else:
+                tl_metadata.chunk_kernel(*args)
+        widths = {self._main_width} if self.compress_ratio else set()
+        if self.indexer is not None:
+            widths.add(self._index_width)
+        if self._short_index_shape is not None:
+            widths.add(self._short_index_shape[1])
+        for width in widths:
+            tl_metadata.pages_kernel(width)
 
     def _declare_mla(self, mode: str, capacity: int, metadata_specs, device):
         """Declare the native sparse-MLA plan for one mode, beside its metadata."""
@@ -1564,16 +1594,30 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase):
                     end = min(offset + chunk_rows, index_rows)
                     count = end - offset
                     row, row_end = first + offset, first + end
-                    _pages[(count, triton.cdiv(index_width, 128))](
-                        im.req_id_per_token,
-                        im.block_table,
-                        index_pages,
-                        row,
-                        im.block_table.stride(0),
-                        min(im.block_table.shape[1], index_width),
-                        index_width,
-                        128,
-                    )
+                    if kernels.uses_tilelang():
+                        from vllm.models.deepseek_v4_1.tilelang import (
+                            metadata as tl_metadata,
+                        )
+
+                        tl_metadata.pages(
+                            im.req_id_per_token,
+                            im.block_table,
+                            index_pages,
+                            row,
+                            count,
+                            min(im.block_table.shape[1], index_width),
+                        )
+                    else:
+                        _pages[(count, triton.cdiv(index_width, 128))](
+                            im.req_id_per_token,
+                            im.block_table,
+                            index_pages,
+                            row,
+                            im.block_table.stride(0),
+                            min(im.block_table.shape[1], index_width),
+                            index_width,
+                            128,
+                        )
                     candidate_args = {}
                     if self.layer_id == self.candidate_source_layer:
                         candidate_args = dict(
@@ -1785,6 +1829,41 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase):
     def _write_decode_metadata(self, buffers, swa, main, rows):
         swa_indices, swa_lengths, top_lengths = buffers[:3]
         visible = main.cache_lengths if main is not None else swa.cache_lengths
+        if kernels.uses_tilelang():
+            from vllm.models.deepseek_v4_1.tilelang import metadata as tl_metadata
+
+            window = dict(
+                page=self.swa_cache_layer.block_size,
+                window=self.window_size,
+                draft=self.is_draft,
+                replay_start=swa.swa_replay_start if self.is_ced_decoder else None,
+            )
+            common = (
+                swa.positions,
+                swa.req_id_per_token,
+                swa.block_table,
+                swa_indices,
+                swa_lengths,
+                top_lengths,
+                visible,
+                swa.query_start_loc,
+                swa.request_positions,
+            )
+            if main is None:
+                tl_metadata.chunk(*common, 0, rows, **window)
+            else:
+                # The window metadata and the main page table in one launch.
+                tl_metadata.decode_metadata(
+                    *common,
+                    main.req_id_per_token,
+                    main.block_table,
+                    buffers[3],
+                    0,
+                    rows,
+                    main.block_table.shape[1],
+                    **window,
+                )
+            return
         _chunk[(rows,)](
             swa.positions,
             swa.req_id_per_token,
@@ -1842,14 +1921,6 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase):
                     f"V4.1 {name} shape mismatch: expected {shape}, "
                     f"got {tuple(tensor.shape)}"
                 )
-        if kernels.uses_tilelang():
-            from vllm.models.deepseek_v4_1.tilelang.wo import TileLangWOProjection
-
-            # The checkpoint tensors in place, no packing.
-            self._wo_projection_weights = TileLangWOProjection(
-                self.wo_a, self.wo_b, groups=groups
-            )
-            return
         self._wo_projection_weights = wo_projection.pack_weights(
             self.wo_a.weight.detach(),
             self.wo_a.weight_scale_inv.detach(),
@@ -1971,28 +2042,7 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase):
             )
         return self._wo_plans[key]
 
-    def _o_proj_tilelang(self, o, positions, sp_rows):
-        """The TileLang WO projection; ``o``'s RoPE columns are rotated in place."""
-        rows, hidden = o.shape[0], self.hidden_size
-        if sp_rows is None:
-            local = torch.empty((rows, hidden), dtype=torch.bfloat16, device=o.device)
-        else:
-            if rows != sp_rows.num_tokens:
-                raise ValueError(f"V4.1 SP WO expects {sp_rows.num_tokens} rows")
-            # Leading rows of the zero-padded buffer the reduce-scatter reads.
-            padded = sp_rows.empty_padded((hidden,), torch.bfloat16, o.device)
-            local = padded[:rows]
-        self._wo_projection_weights(o, positions, self.rotary_emb.cos_sin_cache, local)
-        l2_prefetch.issue(self._l2pf_ffn, rows)
-        if sp_rows is not None:
-            return sp_rows.reduce_scatter(padded)
-        if get_tensor_model_parallel_world_size() > 1:
-            local = get_tp_group().all_reduce(local)
-        return local
-
     def _o_proj(self, o, positions, *, is_prefill=False, sp_rows=None):
-        if kernels.uses_tilelang():
-            return self._o_proj_tilelang(o, positions, sp_rows)
         from b12x.preparation import require_prepared
 
         rows = o.shape[0]

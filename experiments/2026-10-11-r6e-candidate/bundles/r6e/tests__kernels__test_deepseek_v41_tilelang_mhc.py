@@ -129,21 +129,18 @@ def test_post_pre_matches_reference(mhc, tokens):
     _check(actual, _reference(actual[0], fn, scale, base, incoming, weight), tokens)
 
 
-@pytest.mark.parametrize("parts_dtype", [torch.bfloat16, torch.float32])
 @pytest.mark.parametrize("world", [2, 3, 4])
 @pytest.mark.parametrize("tokens", [1, 9, 64, 300])
-def test_post_pre_adds_rank_order_parts(mhc, world, tokens, parts_dtype):
-    """Unreduced partials give exactly the result of their rank-order sum, rounded
-    once to BF16 (FP32 parts: the MoE's unrounded partials)."""
+def test_post_pre_adds_rank_order_parts(mhc, world, tokens):
+    """Unreduced partials give exactly the result of their rank-order sum."""
     residual, fn, scale, base, weight, incoming = _inputs(tokens, seed=200 + tokens)
     g = torch.Generator(device=DEVICE).manual_seed(world * 1000 + tokens)
     parts = torch.randn(world, tokens, HIDDEN, generator=g, device=DEVICE)
-    parts = parts.to(parts_dtype)
+    parts = parts.bfloat16()
     parts[0, 0, :8] = -0.0  # a signed zero, added to nothing, survives
     post = torch.rand(tokens, 4, generator=g, device=DEVICE) * 2
     comb = torch.softmax(torch.randn(tokens, 4, 4, generator=g, device=DEVICE), -1)
     summed = RankOrderParts(parts).sum()
-    assert summed.dtype == torch.bfloat16
     expected = mhc.post_pre(
         summed, residual, post, comb, fn, scale, base, weight, incoming
     )

@@ -340,10 +340,11 @@ def moe_combine_v41(
 ):
     """``Out[t] = sum_k [Weights[t, k] *] Y[RoutePos[t, k]] (+ Shared[t])``.
 
-    FP32 in slot order; ``out_dtype`` out (FP32 keeps the sum unrounded for the
-    cross-rank reduction, as DeepSeek's reference accumulates expert outputs).
+    FP32 in slot order; ``out_dtype`` out (FP32 keeps the routes' sum unrounded
+    until the rank's partial, shared expert included, rounds once).
     """
     rows, layout_rows = T.dynamic("rows, layout_rows")
+    shared_rows = T.dynamic("shared_rows")  # rows with a shared input; any otherwise
     while hidden % block_D:
         block_D //= 2
     assert block_D >= 8, f"hidden={hidden} must be a multiple of 8"
@@ -353,7 +354,7 @@ def moe_combine_v41(
         Y: T.Tensor([layout_rows, hidden], T.bfloat16),
         RoutePos: T.Tensor([rows, topk], T.int32),
         Weights: T.Tensor([rows, topk], T.float32),
-        Shared: T.Tensor([rows, hidden], T.bfloat16),
+        Shared: T.Tensor([shared_rows, hidden], T.bfloat16),
         Out: T.Tensor([rows, hidden], out_dtype),
     ):
         with T.Kernel(hidden // block_D, rows, threads=threads) as (bd, row):
@@ -510,7 +511,8 @@ class MoeDispatchV41Plan:
             else topk_weights
         )
         kernel = self.combine_kernels[(shared is not None, topk_weights is not None)]
-        kernel(y, layout["route_pos"], weights, out if shared is None else shared, out)
+        # Without a shared input the kernel never reads it: any BF16 rows do.
+        kernel(y, layout["route_pos"], weights, y if shared is None else shared, out)
         return out
 
 

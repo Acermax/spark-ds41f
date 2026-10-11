@@ -50,7 +50,7 @@ class _Comm:
         self.recvs.append((peer, tensor))
 
     def all_gather(self, output, tensor):
-        """Each rank's ``tensor`` into ``output`` in rank order (data movement only)."""
+        """Every rank's ``tensor`` into ``output`` in rank order (data movement only)."""
         fabric = self.fabric
         with fabric.lock:
             fabric.gathered[self.rank] = tensor.clone()
@@ -97,7 +97,7 @@ def _run(inputs, collective=None):
 
 def _reference(values):
     """The one-shot all-reduce's arithmetic: FP32 in rank order, one rounding."""
-    total = values[0].to(torch.float32, copy=True)
+    total = values[0].float()
     for value in values[1:]:
         total += value.float()
     return total.to(values[0].dtype)
@@ -206,15 +206,14 @@ def test_one_rounding_differs_from_rounding_each_add():
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA device")
-@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float32])
 @pytest.mark.parametrize("world", [2, 3, 4])
-def test_tilelang_sum_rounds_as_float32_in_rank_order(world, dtype):
+def test_tilelang_sum_rounds_as_float32_in_rank_order(world):
     torch.manual_seed(world)
     parts = [
-        torch.randn(4001, 5120, device="cuda").to(dtype) * 10**k for k in range(world)
+        torch.randn(4001, 5120, device="cuda").bfloat16() * 10**k for k in range(world)
     ]
-    big = torch.finfo(dtype).max
-    tiny = torch.finfo(dtype).tiny
+    big = torch.finfo(torch.bfloat16).max
+    tiny = torch.finfo(torch.bfloat16).tiny
     specials = torch.tensor(
         [
             0.0,
@@ -233,7 +232,7 @@ def test_tilelang_sum_rounds_as_float32_in_rank_order(world, dtype):
             1e-30,
         ],
         device="cuda",
-    ).to(dtype)
+    ).bfloat16()
     for i, part in enumerate(parts):
         part.view(-1)[: specials.numel()] = specials.roll(i)
     got = rank_order_sum(parts)
@@ -258,5 +257,4 @@ def _assert_same_bits(got, want):
     conversion routine, and a NaN hidden state is lost either way)."""
     nan = want.isnan()
     assert torch.equal(got.isnan(), nan)
-    bits = {2: torch.int16, 4: torch.int32}[want.element_size()]
-    assert torch.equal(got.view(bits)[~nan], want.view(bits)[~nan])
+    assert torch.equal(got.view(torch.int16)[~nan], want.view(torch.int16)[~nan])

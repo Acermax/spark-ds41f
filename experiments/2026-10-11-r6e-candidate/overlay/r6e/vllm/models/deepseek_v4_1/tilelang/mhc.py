@@ -65,7 +65,6 @@ def project_streams(
     block_M: int = 16,
     block_H: int = BLOCK_H,
     world: int = 1,
-    parts_dtype: T.dtype = T.bfloat16,
 ):
     """The streams' projection partials and their collapse, for one hidden block.
 
@@ -74,11 +73,9 @@ def project_streams(
     reads streams already updated, and ``"broadcast"`` expands an embedding to
     four copies (the first layer, whose ``fn`` is the stream blocks summed).
     ``X`` is ``(world, M, H)``: with ``world`` > 1 (``"post_pre"`` only) the
-    previous output arrives as the ranks' unreduced partials (``parts_dtype``:
-    BF16, or FP32 for the MoE's unrounded partials), which each thread adds in
-    FP32 in rank order and rounds once to BF16, as the rank-order reduce-scatter
-    and the layer's rounding do, so the output has the same bits as that sum
-    read back.
+    previous output arrives as the ranks' unreduced partials, which each thread
+    adds in FP32 in rank order and rounds once, as the rank-order reduce-scatter
+    does, so the output has the same bits as that sum read back.
 
     Each CTA owns ``block_H`` hidden columns of every stream, a K split of the
     projection, for ``block_M`` tokens. Each thread owns one token's
@@ -121,7 +118,7 @@ def project_streams(
 
     @T.prim_func
     def main(
-        X: T.Tensor((world, M, H), parts_dtype),
+        X: T.Tensor((world, M, H), T.bfloat16),
         R: T.Tensor((M, MULT * H), T.bfloat16),
         post: T.Tensor((M, MULT), T.float32),
         comb: T.Tensor((M, MULT, MULT), T.float32),
@@ -141,7 +138,6 @@ def project_streams(
             F_low = T.alloc_shared((N, block_H), T.float32)
             C_local = T.alloc_fragment((block_M, N), T.float32)
             xv = T.alloc_local((COLS,), T.bfloat16)
-            pv = T.alloc_local((COLS,), parts_dtype)
             rv = T.alloc_local((MULT * COLS,), T.bfloat16)
             nv = T.alloc_local((COLS,), T.bfloat16)
             av = T.alloc_local((COLS,), T.float32)
@@ -175,12 +171,12 @@ def project_streams(
                 # The first part as is (signed zeros survive), then the others.
                 for r in T.unroll(world):
                     for v in T.vectorized(COLS):
-                        pv[v] = X[r, src, h0 + c0 + v]
+                        xv[v] = X[r, src, h0 + c0 + v]
                     for v in T.unroll(COLS):
                         if r == 0:
-                            av[v] = T.Cast(T.float32, pv[v])
+                            av[v] = T.Cast(T.float32, xv[v])
                         else:
-                            av[v] = av[v] + T.Cast(T.float32, pv[v])
+                            av[v] = av[v] + T.Cast(T.float32, xv[v])
                 for v in T.unroll(COLS):
                     xv[v] = T.Cast(T.bfloat16, av[v])
             if mode != "broadcast":
@@ -395,14 +391,9 @@ def finalize(
     return main
 
 
-_PARTS = {torch.bfloat16: T.bfloat16, torch.float32: T.float32}
-
-
 @cache
-def _project(hidden: int, mode: str, world: int = 1, parts=torch.bfloat16):
-    return project_streams(
-        hidden, mode, block_M=BLOCK_M, world=world, parts_dtype=_PARTS[parts]
-    )
+def _project(hidden: int, mode: str, world: int = 1):
+    return project_streams(hidden, mode, block_M=BLOCK_M, world=world)
 
 
 @cache
@@ -469,7 +460,7 @@ def _mhc_pre(
     )
     retain_cuda_graph_capture_resource(scratch)
     P, S, C, Q = scratch
-    _project(hidden, mode, world, x.dtype if world > 1 else torch.bfloat16)(
+    _project(hidden, mode, world)(
         x if x.ndim == 3 else x.unsqueeze(0),
         source,
         mix_post,
@@ -562,11 +553,9 @@ class TileKernelsMHC(nn.Module):
         for mode in ("pre", "post_pre", "broadcast"):
             _project(self.hidden_size, mode)
         if sp_prefill.unreduced_enabled():
-            # Sequence-parallel steps hand post_pre the ranks' unreduced parts:
-            # attention's in BF16, the MoE's in FP32 under its FP32 partials.
+            # Sequence-parallel steps hand post_pre the ranks' unreduced parts.
             world = get_tensor_model_parallel_world_size()
-            for parts in (torch.bfloat16, torch.float32):
-                _project(self.hidden_size, "post_pre", world, parts)
+            _project(self.hidden_size, "post_pre", world)
         for k in (self.hidden_size, MULT * self.hidden_size):
             _finalize(self.hidden_size, k, self.rms_eps, self.hc_eps, self.iterations)
 
