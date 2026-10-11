@@ -43,3 +43,35 @@ The r6d checks never reached that size: eight streams plus a chunk is 176 rows.
 Acceptance: the fabric results equal the one-shot arithmetic bit for bit; every
 temperature-0 scenario identical, references the same as r6d's (no step of those
 reaches the new path); decode, prefill and mixed traffic level.
+
+## Status
+
+Window 1 (2026-10-11, 07:10-07:31 UTC): the bundle passes. Fabric, slowest rank's
+median per call over 20 (rank-order elements differing from the one-shot arithmetic,
+direct / through the communicator; NCCL's ring elements differing):
+
+| Rows | MiB | differ (direct / communicator) | NCCL differs | NCCL | rank order |
+| --- | ---: | --- | ---: | ---: | ---: |
+| 224 | 2.19 | 0 / 0 | 377,052 | 743 us | 903 us (1.21x) |
+| 300 | 2.93 | 0 / 0 | 505,839 | 791 us | 1,038 us (1.31x) |
+| 512 | 5.00 | 0 / 0 | 862,531 | 979 us | 1,339 us (1.37x) |
+| 1024 | 10.0 | 0 / 0 | 1,723,983 | 1,513 us | 1,854 us (1.23x) |
+| 4096 | 40.0 | 0 / 0 | 6,899,246 | 3,814 us | 4,345 us (1.14x) |
+| 8192 | 80.0 | 0 / 0 | 13,793,183 | 6,387 us | 7,397 us (1.16x) |
+
+Serving (r6d / arm / r6d bracket): r6d fails `mixed15` in both runs the same way, 13
+of 16 requests with other tokens and all 16 with other logprobs; the arm has 0 token
+and 1 logprob difference (prompt 11, from token 7, when the long prompt's first chunk
+joins the step). Every other scenario is identical and the references have r6d's
+bits in all three runs. Speed is level: c1 steps within 0.4%, distinct c1/c8 within
+0.4%, mixed traffic within the bracket; cold prefill reads 1.0-1.2% lower than the
+first r6d run and 0.6% than the second, but a single prefill compacts its decoder
+steps to 128 rows and never takes the new path.
+
+The remaining difference occurs once the long prompt's chunk joins fifteen decoding
+streams. The candidates the eight-stream mixed check (176 rows, identical) did not
+cross are few; the source audit found no other row-count switch between 177 and 218
+rows. Window 2 ([w2.json](w2.json), no speed bench) bisects: the arm with the 15-stream
+check twice (does the one difference repeat in place?) and the arm with
+`SPARK3_ENGRAM_ASYNC=0` (`allreduce-sync.json`: the Engram rows read before the
+forward instead of beside it; the rows are the same, only their timing changes).
