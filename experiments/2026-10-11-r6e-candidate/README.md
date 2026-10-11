@@ -60,3 +60,34 @@ last mixed15 difference needs adaptive verification on.
 - **If the fixed arm is fully deterministic:** its speed cost decides between turning
   adaptive verification off and localizing the difference with a graph-safe trace.
 - **If it is not:** the difference has another cause.
+
+### Gate window 2 results (2026-10-11, 13:26-13:52 UTC)
+
+r6d / r6e / r6d bracket, lean screen:
+- **Decode, one prompt each:** prose -8.4% tok/s with acceptance 1.257 to 1.056; JSON
+  step +3.4% with acceptance 3.000 to 3.127, tok/s level. Both follow the changed text,
+  not the kernels.
+  - Paired over the sixteen-prompt acceptance sweep, r6e against r6d is +0.2% ±2.3%
+    tok/s and +1.2% ±4.8% acceptance. The bracket arm is +0.0% ±0.2%.
+- **Distinct prompts one at a time:** +2.5%.
+- **Cold prefill:** +1.0% at 1024 tokens, +1.6% at 16384.
+- **Eight concurrent prompts:** +0.3%.
+- **Mixed traffic:** short TTFT -4.4%. Long TTFT read +2.7% (three rounds, 925-942
+  against r6d's 884-932 ms); adaptive window 1 measured 917 and 916 ms for r6e.
+- **Determinism:** every scenario identical except `mixed15`, 1/1 (r6d: 13/16). The
+  references differ from r6d's, as the precision changes must.
+
+### Adaptive verification window 1 results (2026-10-11, 14:00-14:23 UTC)
+
+r6e / r6e-fixed (adaptive verification off) / r6e bracket:
+- **Cost of turning it off:** decode -7.9% ±2.4% tok/s (paired acceptance sweep),
+  -4.6% on distinct prompts, -23.9% at eight concurrent prompts, and mixed traffic 26%
+  fewer chunks a second with short TTFT +29%.
+- **Determinism:** r6e-fixed still differs, in `mixed` and `mixed15`: prompt 4, logprobs
+  from token 4, tokens from token 11. r6e and its bracket differ the same way in
+  `mixed15` only, as in gate window 2.
+- **References:** identical across the three arms, as greedy verification of every
+  draft must be.
+
+Adaptive verification stays on. The remaining difference is reproducible and has
+another cause. The [bisect](../2026-10-11-r6e-bisect/README.md) finds the piece.
