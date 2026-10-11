@@ -1,0 +1,26 @@
+{
+  "experiment": "experiments/2026-10-12-fixed-row-profile",
+  "run": "fixed-row-profile-w1",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "profile",
+      "workloads": [
+        "code16",
+        "c8"
+      ],
+      "arms": [
+        {
+          "config": "r6d-fixed.json",
+          "label": "r6d"
+        },
+        {
+          "config": "r6f-fixed.json",
+          "label": "r6f"
+        }
+      ]
+    }
+  ]
+}
