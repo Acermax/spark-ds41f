@@ -15,10 +15,10 @@ ROOT = HERE.parents[1]
 REL = HERE.relative_to(ROOT).as_posix()
 BASE = ROOT / "experiments/2026-10-10-r6d-deterministic/r6d-tp4.json"
 R6D = "r6d-candidate"  # the vLLM branch of the r6d image's tree
-ARM = "cec0da371"  # B1 switch on the W8A16 WO-A module: four K shards, split over CTAs at decode
+ARM = "726be4365"  # B1 switch on the W8A16 WO-A module: four K shards, path and tile per bucket
 TREE = "/opt/spark3/candidate/vllm"
 TESTS = ["tests/kernels/quantization/test_deepseek_v41_tilelang_wo.py"]
-BENCH = ROOT / "experiments/2026-10-09-tilelang-migration/bundles/wo-projection"
+KBENCH = ROOT / "experiments/2026-10-09-tilelang-migration/kbench.py"
 
 
 def main():
@@ -46,8 +46,9 @@ def main():
         name = path.replace("/", "__")
         (bundle / name).write_bytes(git("show", f"{ARM}:{path}"))
         mounts.append([name, f"{TREE}/{path}"])
-    for name in ("kbench.py", "bench_wo.py"):  # B1's bench against B12X's fused WO
-        (bundle / name).write_bytes((BENCH / name).read_bytes())
+    # B1's bench against B12X's fused WO, with TileLang's parts timed alone.
+    for name, source in (("kbench.py", KBENCH), ("bench_wo.py", HERE / "bench_wo.py")):
+        (bundle / name).write_bytes(source.read_bytes())
         mounts.append([name, f"/b/{name}"])
     candidate = {"description": "WO with BF16 WO-A against B12X: tests and the B1 bench, in the r6d image.",
                  "image": cluster["container"]["image"], "env": {"HF_HUB_OFFLINE": "1"}, "workdir": TREE,

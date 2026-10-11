@@ -77,3 +77,25 @@ fastest per size and shard count, beside B12X's whole WO from window 4.
 The result picks the shard count and a per-bucket dispatch (path and tile). WO-B's
 share of the whole WO is not measured here; the next WO bench measures the whole
 projection again.
+
+### Window 3 results (2026-10-11, 14:24 UTC)
+
+The WO tests passed (9). Within each shard count every configuration gave the same bits
+at every size. WO-A alone, warm / cold, best per size:
+
+| rows | four shards | two shards | B12X whole WO, warm |
+|---|---|---|---|
+| 1-16 | 10.4-11.4 / 45-48, split 16x64 | 14.1-14.7, split 16x32 | 23.8-24.9 |
+| 24-32 | 13.6-13.9 / 49-50, split 32x64 | 16.9-17.3, split 32x32 | 24.5-25.8 |
+| 48-64 | 19.0-19.7 / 51, split 64x64 | 21.8-23.3, split 64x32 | 37.1-39.2 |
+| 96 | 34.6 / 72.5 split 32x64; 34.8 / 59.2 in-kernel 32x64 | 34.1, split 64x64 | 61.5 |
+| 128 | 39.0 / 69.6, split 64x64 | 38.0, split 64x64 | - |
+| 256 | 69.2 / 73.6, in-kernel 64x64 | 69.0 | - |
+| 512 | 131.4 / 137.2, in-kernel 64x64 | 131.4 | 213.7 |
+| 2048 | 459.6 / 467.0, in-kernel 64x64 | 455.5 | 807.8 |
+| 8192 | 1759.7 / 1768.3, in-kernel 64x64 | 1727.7 | 4523.6 |
+
+Four shards: decode is 22-26% faster than at two shards, and prefill only 1-2% slower.
+64-column tiles win at every size. Split wins up to 64 rows and at 128; in-kernel wins
+at 96 (cold) and from 256 rows. vLLM `726be4365` takes this table; see
+[WO window 5](../2026-10-11-wo-bf16/README.md).

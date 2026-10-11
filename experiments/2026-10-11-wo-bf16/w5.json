@@ -1,0 +1,18 @@
+{
+  "experiment": "experiments/2026-10-11-wo-bf16",
+  "run": "wo-bf16-w5",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "kernel",
+      "bundles": [
+        {
+          "node": "dgx1",
+          "bundle": "experiments/2026-10-11-wo-bf16/bundles/wobf16"
+        }
+      ]
+    }
+  ]
+}

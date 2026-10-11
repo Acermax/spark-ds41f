@@ -8,7 +8,8 @@ place, grouped WO-A, WO-B).
 2. Batch invariance: every row count gives the same rows of the 8192-row batch, and
    repeated graph replays give the same bits.
 3. Time per call under CUDA graphs, warm and cold, at the decode capture sizes and
-   prefill rows.
+   prefill rows, with TileLang's parts (inverse RoPE, WO-A, WO-B with its activation
+   cast) timed alone, and the floor judged per bucket (decode, mid, prefill).
 
 Exits 1 if a check fails or TileLang is more than 3% slower than B12X at any shape.
 """
@@ -20,13 +21,15 @@ from torch import nn
 
 sys.path.insert(0, "/b")
 from kbench import (  # noqa: E402
-    CAPACITY, DECODE, DEVICE, PREFILL, REPEAT, REPLAYS, errors, no_worse, per_call, repeatable, slower,
-    timing_line,
+    CAPACITY, DECODE, DEVICE, PREFILL, REPEAT, REPLAYS, bucket_lines, errors, no_worse, per_call, repeatable,
+    slower, timing_line,
 )
 
 from b12x.gemm import wo_projection  # noqa: E402
 from b12x.preparation import PreparationSession, PreparedCall  # noqa: E402
 
+from vllm.models.deepseek_v4_1.tilelang.linear import _block32_linear  # noqa: E402
+from vllm.models.deepseek_v4_1.tilelang.rope import rope_  # noqa: E402
 from vllm.models.deepseek_v4_1.tilelang.wo import TileLangWOProjection  # noqa: E402
 from vllm.v1.worker.workspace import use_preallocated_workspace  # noqa: E402
 
@@ -66,6 +69,23 @@ scratch = torch.empty(256 << 20, dtype=torch.uint8, device=DEVICE)  # serving bi
 def tilelang(rows):
     with use_preallocated_workspace(scratch):
         tilelang_wo(work[:rows], positions[:rows], table, t_out[:rows])
+
+
+a_mid = torch.empty((CAPACITY, GROUPS * RANK), dtype=torch.bfloat16, device=DEVICE)
+
+
+def part_rope(rows):
+    rope_(work[:rows], positions[:rows], table, 1, True)
+
+
+def part_a(rows):
+    with use_preallocated_workspace(scratch):
+        tilelang_wo.a(work[:rows].view(rows, -1), a_mid[:rows])
+
+
+def part_b(rows):
+    with use_preallocated_workspace(scratch):
+        _block32_linear(a_mid[:rows], t_out[:rows], tilelang_wo.b.tilelang_key, scratch)
 
 
 weights = wo_projection.pack_weights(wo_a.weight, wo_a.weight_scale_inv, wo_b.weight, wo_b.weight_scale_inv,
@@ -165,12 +185,18 @@ with PreparationSession(device="cuda", autotune=False, compile_workers=2) as ses
 
     # 3. Time.
     print("us per call, warm / cold", flush=True)
+    times = {}
     for rows in DECODE + PREFILL:
         base = per_call(lambda: b12x(rows), rows)
         port = per_call(lambda: tilelang(rows), rows)
-        print(timing_line(rows, base, port), flush=True)
+        times[rows] = (base, port)
+        parts = [per_call(lambda: f(rows), rows) for f in (part_rope, part_a, part_b)]
+        print(timing_line(rows, base, port) + "  parts rope/wo-a/wo-b "
+              + ", ".join(f"{w:.1f}/{c:.1f}" for w, c in parts), flush=True)
         if slower(base, port):
             failures.append(f"rows {rows}: TileLang slower")
+    lines, _ = bucket_lines(times)
+    print("per bucket, TileLang against B12X:", *lines, sep="\n", flush=True)
 
 for failure in failures:
     print("FAIL", failure)

@@ -107,3 +107,25 @@ Window 4 ([w4.json](w4.json), kernel only) reruns the bench.
 
 The [split sweep](../2026-10-11-wo-bf16-sweep/README.md#window-3) chooses, per row
 bucket, the path (split or in-kernel shards) and the tile, at two and four shards.
+
+### The split sweep's tiles (vLLM `726be4365`)
+
+The [split sweep](../2026-10-11-wo-bf16-sweep/README.md#window-3-results-2026-10-11-1424-utc) chose a path
+and a tile per bucket, all at four shards and 64 columns:
+
+| rows | path | tile rows | WO-A alone, warm (us) |
+|---|---|---|---|
+| 1-16 | split | 16 | 10.4-11.4 (was 13.0-14.1) |
+| 17-32 | split | 32 | 13.6-13.9 (was 16.8-17.4) |
+| 33-64 | split | 64 | 19.0-19.7 (was 22.4-24.2) |
+| 65-96 | in-kernel | 32 | 34.8 at 96 |
+| 97-128 | split | 64 | 39.0 at 128 |
+| 129+ | in-kernel | 64 | 69 at 256, 131 at 512, 460 at 2048, 1760 at 8192 |
+
+From window 4's whole-projection times, WO-B and the inverse RoPE take about 10 us at
+decode but about 160 us at 512 rows and 390 at 2048. There WO-A's gain alone cannot
+reach B12X's whole WO (214 and 808 us).
+
+Window 5 ([w5.json](w5.json), kernel only) reruns the bench at `726be4365`. The bench
+now times TileLang's parts alone (inverse RoPE, WO-A, WO-B with its activation cast)
+and judges the floor per bucket.
