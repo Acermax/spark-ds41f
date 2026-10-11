@@ -4,8 +4,10 @@ The precision fixes (FP32 head logits, FP32 shared-expert SwiGLU) bring temperat
 outputs closer to DeepSeek's reference and so change the text. The lean screen's
 single-stream points each decode one prompt, so their tok/s moves with that prompt's
 new continuation: FP32-head window 1 had prose-c1 at -6.1% (accepted/draft 1.116
-against 1.257) with GPU step time level, and JSON (acceptance at its 3.000 maximum in
-every arm) level. One text cannot separate an acceptance shift from a different text.
+against 1.257) with GPU step time level, and JSON (acceptance unchanged at 3.000)
+level; the shared-SwiGLU arm moved the other way, JSON to 3.262 accepted per draft
+(+5.0% tok/s) and c1 distinct to -2.1%. One text cannot separate an acceptance shift
+from a different text.
 
 [`scripts/acceptance_sweep.py`](../../scripts/acceptance_sweep.py) runs each of the
 sixteen distinct-stream prompts alone (thinking off, temperature 0, 256 tokens, fresh
