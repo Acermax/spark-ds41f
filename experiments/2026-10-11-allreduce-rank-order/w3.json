@@ -28,6 +28,29 @@
           "label": "eager"
         }
       ]
+    },
+    {
+      "kind": "measure",
+      "bench": false,
+      "bracket": false,
+      "extras": [
+        [
+          "experiments/2026-10-11-allreduce-rank-order/row_trace_session.py",
+          [
+            "--prompt",
+            "11",
+            "--around",
+            "7"
+          ],
+          "trace"
+        ]
+      ],
+      "arms": [
+        {
+          "config": "allreduce-trace.json",
+          "label": "trace"
+        }
+      ]
     }
   ]
 }

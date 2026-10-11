@@ -15,6 +15,7 @@ ROOT = HERE.parents[1]
 REL = HERE.relative_to(ROOT).as_posix()
 BASE = ROOT / "experiments/2026-10-10-r6d-deterministic/r6d-tp4.json"
 R6D = "r6d-candidate"  # the vLLM branch of the r6d image's tree
+TRACE = "8fd502d47"  # the debug row trace, on the arm's commits
 ARM = "86b35b41e"  # the all-reduce switch, on its module and the sum fix
 TREE = "/opt/spark3/candidate/vllm"
 TESTS = ["tests/kernels/test_deepseek_v41_tilelang_collectives.py"]
@@ -46,6 +47,18 @@ def main():
     eager = json.loads(json.dumps(cluster))
     eager["serve_args"] = [*eager["serve_args"], "--enforce-eager"]
     (HERE / "allreduce-eager.json").write_text(json.dumps(eager, indent=2) + "\n")
+    # Window 3's trace: eager, with the debug row trace (vLLM r6d-row-trace) mounted too.
+    traced = git("diff", "--name-only", R6D, TRACE, "--", "vllm").decode().split()
+    for path in traced:
+        out = HERE / "overlay" / "trace" / path
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(git("show", f"{TRACE}:{path}"))
+    trace = json.loads(json.dumps(eager))
+    trace["container"]["mounts"] = [m for m in trace["container"]["mounts"] if "/overlay/allreduce/" not in m[0]]
+    trace["container"]["mounts"] += [
+        [f"{{home}}/projects/spark-ds41f/{REL}/overlay/trace/{path}", f"{TREE}/{path}", "ro"] for path in traced]
+    trace["environment"]["VLLM_DS41_ROW_TRACE_DIR"] = "/cache/row-trace"
+    (HERE / "allreduce-trace.json").write_text(json.dumps(trace, indent=2) + "\n")
     bundle = HERE / "bundles" / "allreduce"
     bundle.mkdir(parents=True, exist_ok=True)
     mounts = []

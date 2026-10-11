@@ -86,5 +86,8 @@ step shape that fifteen streams reach and eight do not.
 Window 3 ([w3.json](w3.json)) runs `mixed15` on the arm without CUDA graphs
 (`allreduce-eager.json`, `--enforce-eager`): graph replays pad decode steps to the
 capture sizes (90 rows to 96) and eager steps do not. If the difference goes away the
-cause is the graphs or their padding; if it stays, a per-layer row trace (eager)
-localizes it.
+cause is the graphs or their padding. Its second job localizes it if it stays:
+`allreduce-trace.json` (eager, with the debug row trace of vLLM `r6d-row-trace`
+`8fd502d47`, `VLLM_DS41_ROW_TRACE_DIR=/cache/row-trace`) and
+[row_trace_session.py](row_trace_session.py), which traces the rows feeding prompt
+11's tokens 4-9 alone and in mixed15 and reports the first layer whose digests differ.
