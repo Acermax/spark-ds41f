@@ -8,6 +8,7 @@ import importlib.machinery
 import importlib.util
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -740,3 +741,51 @@ class ImageAndBenchTest(unittest.TestCase):
         self.assertEqual(bench[:7], ["--cluster-config", "experiments/x/a.json", "bench", "--suites",
                                      "quality,decode", "--concurrency", "1,16"])
         self.assertNotIn("--allow-mismatch", bench)
+
+
+class ReleaseProfileTest(unittest.TestCase):
+    def test_release_profile_builds_its_bench_and_table(self) -> None:
+        spec = {"experiment": "experiments/x", "run": "rel", "jobs": [{
+            "kind": "measure", "profile": "release", "bracket": False,
+            "arms": [{"config": "base.json", "label": "base"}, {"config": "cand.json", "label": "cand"}]}]}
+        steps = lab.plan(spec)
+        bench = [s for s in steps if s["kind"] == "cli"]
+        self.assertEqual(len(bench), 2)
+        self.assertIn("quality,decode,prefill", bench[0]["argv"])
+        self.assertEqual(steps[-1]["argv"][:4], ["scripts/release_table.py", "rel", "base", "cand"])
+        stems = {s["out"].rsplit("/", 1)[1] for s in steps if s["kind"] == "script"}
+        for stem in ("determinism", "sweep", "c1-distinct", "c4-distinct", "c8-distinct", "c16-distinct",
+                     "ttft", "mixed"):
+            self.assertIn(f"{stem}-cand.jsonl", stems)
+
+    def test_release_prefill_sizes_fit_a_1m_profile(self) -> None:
+        args = lab.PROFILES["release"]["bench_args"]
+        sizes = [int(x) for x in args[args.index("--prefill-sizes") + 1].split(",")]
+        self.assertTrue(all(size < 1048576 - 64 for size in sizes))
+        self.assertIn(1000000, sizes)
+
+    def test_release_table_judges_against_the_first_arm(self) -> None:
+        import subprocess
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            det = root / "results/private/determinism/rel"
+            det.mkdir(parents=True)
+            for arm, tps, prefill in (("base", 200.0, 5000.0), ("cand", 220.0, 5005.0)):
+                bench = root / f"results/private/bench/rel-{arm}"
+                bench.mkdir(parents=True)
+                (bench / "bench.json").write_text(json.dumps({"suites": {
+                    "quality": {"passed": 5, "runs": [1, 2, 3, 4, 5], "ok": True},
+                    "prefill": {"points": {"32768": {"prefill_tps": {"n": 3, "mean": prefill, "sd": 10.0}}}},
+                    "decode": {"points": {}}}}))
+                (det / f"c16-distinct-{arm}.jsonl").write_text(json.dumps(
+                    {"summary": "c16", "tps_mean": tps, "ci95_pct": 2.0}) + "\n")
+                (det / f"sweep-{arm}.jsonl").write_text("".join(
+                    json.dumps({"prompt": p, "tps": 80.0 + p + (5 if arm == "cand" else 0),
+                                "accepted_per_draft": 1.5}) + "\n" for p in range(16)))
+            out = subprocess.run([sys.executable, str(ROOT / "scripts/release_table.py"), "rel", "base", "cand"],
+                                 cwd=root, text=True, capture_output=True, check=True).stdout
+        self.assertIn("16 distinct streams tok/s", out)
+        self.assertRegex(out, r"16 distinct streams tok/s.*\+10\.0%.*faster")
+        self.assertRegex(out, r"32,768 tokens.*same")
+        self.assertRegex(out, r"acceptance sweep tok/s.*paired over 16 prompts.*faster")
+        self.assertIn("5/5", out)
