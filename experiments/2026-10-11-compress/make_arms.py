@@ -17,7 +17,7 @@ REL = HERE.relative_to(ROOT).as_posix()
 BASE = ROOT / "experiments/2026-10-10-r6d-deterministic/r6d-tp4.json"
 KBENCH = ROOT / "experiments/2026-10-09-tilelang-migration/kbench.py"
 R6D = "r6d-candidate"  # the vLLM branch of the r6d image's tree
-ARM = "fa7be7d63"  # the compression switch, on its module
+ARM = "e849609f9"  # the compression switch, on its module, with the strided ring pool
 TREE = "/opt/spark3/candidate/vllm"
 TESTS = ["tests/kernels/test_deepseek_v41_tilelang_compress.py"]
 
