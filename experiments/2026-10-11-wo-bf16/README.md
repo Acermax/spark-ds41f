@@ -30,3 +30,20 @@ change moves temperature-0 text.
 
 Acceptance: temperature-0 identical within the arm; the bench at or above B12X at every
 size; decode and prefill at or above r6d.
+
+### Window 1 (2026-10-11, 09:04 UTC): did not compile
+
+The kernel bundle failed (`test_wo_projection`, `test_wo_a_keeps_bf16_activations`:
+"1 error detected in the compilation of tvm_kernels.cu"), and the window was closed
+early by request before the WO arm booted; production kept serving r6d. A CPU-only
+compile of the four row tiles in the r6d image (no GPU, memory-capped) reproduced it:
+the 16- and 32-row tiles (`block_N=32`) compile, the 64- and 128-row tiles
+(`block_N=64`) do not. The kernel read one UE8M0 exponent per weight element; at that
+width the gather vectorizes to an eight-byte pack that TVM writes as an `int`
+expression assigned to `uint2`.
+
+vLLM `d9bf17e78` decodes each tile's exponents (at most 2x2) into FP32 powers of two in
+shared memory once per K tile and multiplies from there: the same products, one more
+barrier per tile. All four tiles compile; the generated loop double-buffers the scale
+tile with the pipeline. Window 2 ([w2.json](w2.json)) is window 1 again on the fixed
+arm, with the acceptance sweep.
