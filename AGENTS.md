@@ -70,8 +70,9 @@ Coordinate through `~/spark-hold.json` on dgx1:
   hold file. If it exists and you are not its holder, do not act. To ask for the
   cluster, write `~/spark-request.json` (who, why, how long); a runner holding a
   window closes it after its current job.
-- To take the cluster, write the hold file with `holder`, `since`, `expected_end`,
-  `heartbeat` and the rule it imposes, and remove it once production is restored.
+- To take the cluster, write the hold file with `holder`, `since`, `expected_end`
+  (null when the window has no time cap: it lasts until its work is done or someone
+  asks), `heartbeat` and the rule it imposes, and remove it once production is restored.
   `scripts/lab.py window open` does this behind the publish and idle guards.
 - A holder refreshes `heartbeat` while it works. The watchdog that
   `scripts/lab.py` starts with a window restores the promoted service and removes

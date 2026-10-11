@@ -48,6 +48,17 @@ class HoldTest(unittest.TestCase):
         self.assertEqual(lab.parse_time(hold["expected_end"]) - lab.parse_time(hold["since"]), 1800)
         self.assertAlmostEqual(lab.heartbeat_age(hold, at=1_000_090.0), 90, delta=1)
 
+    def test_a_window_without_a_cap_never_closes_on_the_clock(self) -> None:
+        hold = lab.new_hold(0, "queue", at=1_000_000.0)
+        self.assertIsNone(hold["expected_end"])
+        self.assertEqual(lab.DEFAULT_MINUTES, 0)
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(lab, "REQUEST", Path(directory) / "request.json"), \
+                mock.patch.object(lab, "LEGACY_REQUEST", Path(directory) / "legacy-request.json"):
+            self.assertIsNone(lab.window_should_close(hold, at=1_000_000.0 + 7 * 86400))
+            lab.REQUEST.write_text("{}")
+            self.assertIn("requested", lab.window_should_close(hold, at=1_000_060.0))
+
     def test_foreign_or_missing_holds_are_not_ours(self) -> None:
         self.assertFalse(lab.hold_is_ours(None))
         self.assertFalse(lab.hold_is_ours({"holder": "codex tool-eval-bench"}))
@@ -458,6 +469,30 @@ class QueueFailureTest(unittest.TestCase):
             self.assertEqual([p.name for p in (queue / "failed").iterdir()], ["20260101T000000-a.json"])
             self.assertEqual([p.name for p in (queue / "done").iterdir()], ["20260101T000001-b.json"])
             self.assertEqual(closed, ["time cap reached"])
+
+
+    def test_an_idle_queue_holds_the_window_without_an_idle_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            queue = Path(directory) / "queue"
+            queue.mkdir()
+            closed, logs = [], []
+            # Idle polls a day apart, then a request: only the request closes the window.
+            clock = iter(1_000_000.0 + 86400 * i for i in range(100))
+            reasons = iter([None, None, None, "cluster requested (x)"])
+            with mock.patch.object(lab, "QUEUE", queue), \
+                    mock.patch.object(lab, "window_open"), \
+                    mock.patch.object(lab, "read_hold", return_value={"holder": "spark-lab: queue"}), \
+                    mock.patch.object(lab, "hold_is_ours", return_value=True), \
+                    mock.patch.object(lab, "window_should_close", side_effect=lambda hold: next(reasons)), \
+                    mock.patch.object(lab, "execute") as execute, \
+                    mock.patch.object(lab, "beat"), mock.patch.object(lab, "log", side_effect=logs.append), \
+                    mock.patch.object(lab.time, "sleep"), mock.patch.object(lab.time, "time", side_effect=clock), \
+                    mock.patch.object(lab, "window_close", side_effect=lambda reason, dry=False: closed.append(reason)):
+                code = lab.queue_run(idle_minutes=0, minutes=0)
+            self.assertEqual(code, 0)
+            execute.assert_not_called()
+            self.assertEqual(closed, ["cluster requested (x)"])
+            self.assertIn("QUEUE idle (held for the next spec)", logs)
 
 
 class CustomWorkloadTest(unittest.TestCase):

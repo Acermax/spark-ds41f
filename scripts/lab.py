@@ -2,12 +2,12 @@
 """Experiment windows, runs and kernel-lab jobs on the Spark cluster.
 
 usage (on dgx1, from the deployment checkout):
-  scripts/lab.py window open [--minutes M] [--note TEXT] [--production-config PATH]
+  scripts/lab.py window open [--minutes M] [--note TEXT] [--production-config PATH]   (M=0: no cap)
   scripts/lab.py window status
   scripts/lab.py window close [--production-config PATH]
   scripts/lab.py run SPEC.json [--dry-run] [--keep-open] [--production-config PATH]
   scripts/lab.py queue add SPEC.json      (queue a spec for the open or next window)
-  scripts/lab.py queue run [--idle-minutes M] [--minutes M] [--production-config PATH]
+  scripts/lab.py queue run [--idle-minutes M] [--minutes M] [--production-config PATH]   (0: never)
   scripts/lab.py queue status
   scripts/lab.py kernel-local BUNDLE_DIR [--out DIR] [--dry-run]   (on any node, cluster stopped)
   scripts/lab.py watchdog [--max-age SECONDS] [--once]
@@ -17,9 +17,10 @@ A window holds the cluster for one experiment session. While it is open the hold
 restart, sync or benchmark the cluster, and this runner refuses to open a window over a
 hold someone else wrote. Jobs inside a window run back to back with no restore of the
 promoted service in between; the window closes (production booted, doctor --live, hold
-removed) when the run ends, when a job fails, when someone writes ~/spark-request.json,
-or at its time cap. A watchdog started with the window closes it if the runner stops
-refreshing the heartbeat.
+removed) when the run ends, when someone writes ~/spark-request.json, or when it is closed
+(window close). It has no time cap unless one is asked for (--minutes M; the hold's
+expected_end is null without one), so no job is cut short by a clock. A watchdog started
+with the window closes it if the runner stops refreshing the heartbeat.
 
 The production profile is the cluster configuration a window restores and whose node map
 every cluster action uses (--production-config, default config/cluster.json). A window
@@ -28,8 +29,9 @@ opens only while that profile is the live cluster, records it in the hold file a
 queue) follows the record.
 
 A queue runner opens one window and runs queued specs back to back (oldest first), so the
-cluster keeps working while results are read and the next spec is written; it waits up to
---idle-minutes for a new spec before closing the window. Terminal lines for watchers:
+cluster keeps working while results are read and the next spec is written. An empty
+queue keeps the window held for the next spec; --idle-minutes M closes it after M idle
+minutes instead. Terminal lines for watchers:
 "QUEUE job <name> done|failed", "QUEUE idle", "QUEUE closed". A "sync" job moves the node
 checkouts to origin/main between jobs, so newly published arms can join an open window.
 
@@ -81,7 +83,7 @@ CONTAINER = "dsv41-karmic-kraken"
 CANDIDATE = "/opt/spark3/candidate"
 # The GPU's DRM card by PCI path, as the serving container mounts it for the display carve-out.
 DRM_CARD = "/dev/dri/by-path/pci-000f:01:00.0-card"
-DEFAULT_MINUTES = 120
+DEFAULT_MINUTES = 0  # no time cap: a window ends when its work is done or it is asked for
 HEARTBEAT_MAX_AGE = 900
 # The profile a window restores; main() sets it from --production-config or the open window's hold.
 PRODUCTION_CONFIG = spark.DEFAULT_CLUSTER_CONFIG
@@ -167,9 +169,11 @@ def hold_is_ours(hold: dict | None) -> bool:
 
 
 def new_hold(minutes: int, note: str, at: float | None = None) -> dict:
+    """The hold file of a new window; ``expected_end`` is null without a cap (minutes 0)."""
     at = time.time() if at is None else at
     stamp = dt.datetime.fromtimestamp(at, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    end = dt.datetime.fromtimestamp(at + 60 * minutes, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    end = (dt.datetime.fromtimestamp(at + 60 * minutes, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+           if minutes > 0 else None)
     return {
         "holder": f"{HOLDER_PREFIX}: {note}" if note else HOLDER_PREFIX,
         "window": f"{socket.gethostname()}-{int(at)}",
@@ -219,7 +223,7 @@ def window_should_close(hold: dict, at: float | None = None) -> str | None:
     for request in (REQUEST, LEGACY_REQUEST):
         if request.exists():
             return f"cluster requested ({request})"
-    if at > parse_time(hold["expected_end"]):
+    if hold.get("expected_end") and at > parse_time(hold["expected_end"]):
         return "time cap reached"
     return None
 
@@ -376,7 +380,8 @@ def window_open(minutes: int, note: str, dry: bool = False) -> None:
         raise SystemExit("not opening: the cluster is serving requests")
     hold = new_hold(minutes, note)
     write_json_atomic(HOLD, hold)
-    log(f"window {hold['window']} open until {hold['expected_end']}; restores {PRODUCTION_CONFIG}")
+    log(f"window {hold['window']} open until {hold['expected_end'] or 'released'}; "
+        f"restores {PRODUCTION_CONFIG}")
     watchdog_log = ROOT / "results" / "private" / "lab" / f"watchdog-{hold['window']}.log"
     watchdog_log.parent.mkdir(parents=True, exist_ok=True)
     with watchdog_log.open("a") as handle:
@@ -1088,8 +1093,8 @@ def execute(spec: dict, dry: bool, keep_open: bool, close_on_failure: bool = Tru
     stop_beating = threading.Event()
 
     def heartbeat() -> None:
-        # The heartbeat proves the runner is alive, not that a step is quick; the time cap
-        # bounds a hung step, the watchdog a dead runner.
+        # The heartbeat proves the runner is alive, not that a step is quick: the watchdog
+        # catches a dead runner; a hung step is for whoever watches the run (or a cap).
         while not stop_beating.wait(60):
             try:
                 beat(current["note"])
@@ -1207,7 +1212,8 @@ def queued() -> list[Path]:
 
 
 def queue_run(idle_minutes: int, minutes: int) -> int:
-    """Run queued specs back to back in one window; close it when the queue stays empty."""
+    """Run queued specs back to back in one window. An empty queue keeps the window held
+    for the next spec unless ``idle_minutes`` > 0 closes it after that long."""
     window_open(minutes, "queue")
     if not hold_is_ours(read_hold()):
         return 1
@@ -1230,8 +1236,9 @@ def queue_run(idle_minutes: int, minutes: int) -> int:
         if not pending:
             if idle_since is None:
                 idle_since = time.time()
-                log(f"QUEUE idle (closing in {idle_minutes} min unless a spec arrives)")
-            if time.time() - idle_since > 60 * idle_minutes:
+                log(f"QUEUE idle (closing in {idle_minutes} min unless a spec arrives)" if idle_minutes
+                    else "QUEUE idle (held for the next spec)")
+            if idle_minutes and time.time() - idle_since > 60 * idle_minutes:
                 window_close("queue empty")
                 log("QUEUE closed (empty)")
                 return 0
@@ -1443,8 +1450,8 @@ def main(argv: list[str] | None = None) -> int:
     queue = commands.add_parser("queue", parents=[production])
     queue.add_argument("action", choices=("add", "run", "status"))
     queue.add_argument("spec", nargs="?")
-    queue.add_argument("--idle-minutes", type=int, default=10)
-    queue.add_argument("--minutes", type=int, default=180)
+    queue.add_argument("--idle-minutes", type=int, default=0)  # 0: hold while idle
+    queue.add_argument("--minutes", type=int, default=0)  # 0: no time cap
     kernel = commands.add_parser("kernel-local")
     kernel.add_argument("bundle")
     kernel.add_argument("--out")
