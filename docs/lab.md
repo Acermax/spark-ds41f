@@ -6,7 +6,7 @@ service after every run. It replaces the copy-and-edit `runNN.sh` pattern.
 ## Windows
 
 ```sh
-scripts/lab.py window open --minutes 90 --note "mHC screen" --production-config config/cluster-tp4.json
+scripts/lab.py window open --note "mHC screen" --production-config config/cluster-tp4.json
 scripts/lab.py window status
 scripts/lab.py window close
 ```
@@ -19,9 +19,9 @@ scripts/lab.py window close
 - the cluster has served no requests for 30 s;
 - no one else holds `~/spark-hold.json`.
 
-It then writes the hold file and starts a watchdog. The hold file records the time cap,
-the production profile (`production_config`) and a heartbeat that the runner refreshes
-every minute. The watchdog restores the production profile and removes the hold if the
+It then writes the hold file and starts a watchdog. The hold file records the production
+profile (`production_config`), a heartbeat that the runner refreshes every minute, and
+`expected_end`: null, because a window has no time cap unless `--minutes M` asks for one. The watchdog restores the production profile and removes the hold if the
 heartbeat goes stale for 15 minutes.
 
 `close` boots the production profile (unless it is already live), checks
@@ -30,9 +30,13 @@ heartbeat goes stale for 15 minutes.
 A window closes itself:
 
 - when its run completes, unless the run uses `--keep-open`;
-- when a job fails;
-- at its time cap;
-- when someone writes `~/spark-request.json`. The runner finishes the current job first.
+- when someone writes `~/spark-request.json`. The runner finishes the current job first;
+- at a time cap, only if one was given (`--minutes M`).
+
+No clock cuts a job short. A queue runner keeps the window held while its queue is
+empty, ready for the next spec, until `window close` or a request (`--idle-minutes M`
+closes it after M idle minutes instead). A failed job costs only itself; the queue
+continues.
 
 ### Production profile
 
