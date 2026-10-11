@@ -81,3 +81,19 @@ Acceptance: temperature-0 identical within the arm in every scenario; each metri
 cost reported against the all-reduce arm and every metric still above B12X's. A
 cost beyond noise goes to its own follow-up (the rounding fused into the reduction,
 or the combine writing straight into the one-shot buffer), not a weaker switch.
+
+## Window 1 results (2026-10-11, 11:18-11:22 UTC)
+
+- **Kernel bundle:** 49 passed, 3 failed. `test_moe_experts_fp32_output` caught a
+  combine bug: without a shared input the combine passed its output as the BF16
+  `Shared` operand, and the arm would have crashed at its first forward. The window
+  was closed before the arms booted.
+- **Fabric:** every FP32 result bit for bit equal to the rank-order sum.
+  - The prefill reduce-scatter took twice the BF16 time (1.97 against 3.41 ms at 2048
+    rows, 9.88 against 19.61 ms at 16384), about 14% of a 16K prefill over 40 MoE
+    layers.
+  - The small all-reduce timings were host-bound and unusable.
+- **Outcome:** superseded by
+  [moe-one-rounding](../2026-10-11-moe-one-rounding/README.md). It rounds each rank's
+  partial once, as the reference's row-parallel layers do, and keeps the reduction
+  BF16.

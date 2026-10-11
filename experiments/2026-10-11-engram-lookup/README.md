@@ -40,3 +40,25 @@ reader staged in mapped host memory.
 
 Acceptance: identical outputs and references to r6d; the bench faster than B12X
 everywhere (the owner's bar); serving level or better.
+
+### Window 1 kernel results (2026-10-11, 11:23 UTC)
+
+Tests 13 passed: bits equal to B12X's in every layout. The bench missed the bar at small
+sizes:
+
+| tokens | disk (mapped host) warm vs B12X | resident warm vs B12X |
+|---|---|---|
+| 1-48 | 1.08-1.31x slower (0.3-0.5 us) | 1.03-1.61x slower (0.6-0.7 us) |
+| 72-96 | 0.94-1.02x | 0.91-0.99x |
+| 512-8192 | 0.89-1.00x faster | 0.79-0.99x faster |
+
+The first version issued three dependent global loads: the live count, then the hash,
+then the row.
+
+vLLM `91eb87dcf` issues every load at once, with the same bits:
+- a compact slot's row is its own position;
+- a shard row is clamped to 0 when the slot is not local;
+- dead slots select zero afterwards.
+
+Window 2 ([w2.json](w2.json)) is the kernel bundle again, tests and bench, kernel only.
+The serving screen of window 1 stands: the bits are unchanged.

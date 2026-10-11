@@ -64,33 +64,34 @@ def engram_lookup_kernel(
             if pair < P * HEADS:
                 t = pair // HEADS
                 head = pair % HEADS
+                # Every load issues at once: the hash and the live count do not gate
+                # the row loads (a compact slot's row is its own position; a shard row
+                # is clamped to 0 when not local), and dead slots select zero after.
                 live_count = num_tokens[0]
+                row = hashes[t, head]
                 live = (t < live_count) & (live_count >= 0) & (live_count <= max_tokens)
-                row = T.if_then_else(live, hashes[t, head], T.int64(-1))
                 local = live & (row >= start) & (row < end) & (row < rows)
                 shard_row = T.if_then_else(local, row - start, T.int64(0))
                 weight_row = T.Cast(T.int64, pair) if compact else shard_row
                 scale_row = shard_row if resident_scales else weight_row
-                if local:
-                    for v in T.vectorized(_VEC):
-                        quant[v] = weight[weight_row, c0 + v]
-                    exponent = T.Cast(T.uint32, scales[scale_row, c0 // SF_BLOCK])
-                    scale = T.if_then_else(
-                        exponent == T.uint32(0),
-                        T.float32(2.0**-127),
-                        T.if_then_else(
-                            exponent == T.uint32(255),
-                            T.reinterpret(T.uint32(0x7FC00000), T.float32),
-                            T.reinterpret(T.shift_left(exponent, 23), T.float32),
-                        ),
+                for v in T.vectorized(_VEC):
+                    quant[v] = weight[weight_row, c0 + v]
+                exponent = T.Cast(T.uint32, scales[scale_row, c0 // SF_BLOCK])
+                scale = T.if_then_else(
+                    exponent == T.uint32(0),
+                    T.float32(2.0**-127),
+                    T.if_then_else(
+                        exponent == T.uint32(255),
+                        T.reinterpret(T.uint32(0x7FC00000), T.float32),
+                        T.reinterpret(T.shift_left(exponent, 23), T.float32),
+                    ),
+                )
+                for v in T.unroll(_VEC):
+                    result[v] = T.if_then_else(
+                        local,
+                        T.Cast(T.bfloat16, T.Cast(T.float32, quant[v]) * scale),
+                        T.Cast(T.bfloat16, T.float32(0)),
                     )
-                    for v in T.unroll(_VEC):
-                        result[v] = T.Cast(
-                            T.bfloat16, T.Cast(T.float32, quant[v]) * scale
-                        )
-                else:
-                    for v in T.unroll(_VEC):
-                        result[v] = T.Cast(T.bfloat16, T.float32(0))
                 for v in T.vectorized(_VEC):
                     out[t, head * WIDTH + c0 + v] = result[v]
 
