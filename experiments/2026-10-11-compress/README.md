@@ -20,16 +20,15 @@ of a 31.5 ms c1 step.
 
 ## The change (vLLM branch `r6d-compress`, on r6d's tree)
 
-- `a3b21cdda` (module): `tilelang/compress.py`.
+- `c1e10dce3` (module): `tilelang/compress.py`.
   - `gather_partial_state` is vLLM's carry load.
   - `compress` runs over the step's rows only: one warp a token, 16 values a lane,
     a warp-shuffle sum of squares, and library `exp` and `rsqrt` as DeepSeek's
     reference computes them (B12X used fast approximations).
-  - It also saves each request's latest ring positions, so a slot holds its latest
-    position. vLLM's Triton save let every position of a long prefill chunk race for
-    its slot. Chunk alignment keeps those slots unread today, so this changes no
-    output.
-- `49e598640` (switch): the compressor runs the two TileLang launches under the
+  - It also saves each live token's ring state for the rows the metadata gives a
+    ring slot. Those are a request's last ring-size rows; earlier rows would share
+    slots. The kernel keeps that bound itself as well.
+- `fa7be7d63` (switch): the compressor runs the two TileLang launches under the
   TileLang family; they compile at preparation. B12X's preparation still allocates
   the compressor's buffers (migration step 7).
 
