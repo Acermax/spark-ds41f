@@ -81,6 +81,11 @@
         "ro"
       ],
       [
+        "{home}/projects/spark-ds41f/experiments/2026-10-11-r6e-bisect/overlay/trace/vllm/models/deepseek_v4_1/common/engram.py",
+        "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/common/engram.py",
+        "ro"
+      ],
+      [
         "{home}/projects/spark-ds41f/experiments/2026-10-11-r6e-bisect/overlay/trace/vllm/models/deepseek_v4_1/compressor.py",
         "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/compressor.py",
         "ro"
