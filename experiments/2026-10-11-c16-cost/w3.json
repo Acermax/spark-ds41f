@@ -1,0 +1,55 @@
+{
+  "experiment": "experiments/2026-10-11-c16-cost",
+  "run": "c16-bisect-w3",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "measure",
+      "bracket": false,
+      "extras": [],
+      "bench_args": [
+        "--allow-mismatch",
+        "--compare",
+        "none",
+        "--suites",
+        "decode",
+        "--decode-cases",
+        "code",
+        "--concurrency",
+        "16",
+        "--min-samples",
+        "3",
+        "--max-samples",
+        "3"
+      ],
+      "arms": [
+        {
+          "config": "experiments/2026-10-10-r6d-deterministic/r6d-tp4.json",
+          "label": "r6d"
+        },
+        {
+          "config": "p1-allreduce-adaptive.json",
+          "label": "p1-allreduce"
+        },
+        {
+          "config": "p2-moe-adaptive.json",
+          "label": "p2-moe"
+        },
+        {
+          "config": "p3-head-adaptive.json",
+          "label": "p3-head"
+        },
+        {
+          "config": "p4-precision-adaptive.json",
+          "label": "p4-precision"
+        },
+        {
+          "config": "experiments/2026-10-11-attn-split/r6f-split.json",
+          "label": "r6f"
+        }
+      ]
+    }
+  ]
+}
