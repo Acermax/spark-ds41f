@@ -98,3 +98,11 @@ The promoted r6f image (`config/cluster-tp4.json`) with real-row profiling, at s
 all-gather shard limit of 2 MiB (r6f), 4 MiB (the TP3 recipe's) and 8 MiB, then r6f
 again. A gather copies, so the limit cannot change bits. FP32 logits at 17-32 rows fit
 4 MiB, and up to 64 rows fit 8 MiB.
+
+### Window 6 results (2026-10-11, 21:50-21:58 UTC)
+
+Verify cost against the mean of the two r6f arms, averaged over 24-96 rows: 4 MiB -0.4%,
+8 MiB -0.3%, the r6f arms ±0.1% of their mean (single points ±1.5%). r6d (window 5) is
+3.1% cheaper there. The higher limit has no measurable effect on the verify forward.
+The cost profile times graph-replayed forwards, so a logits gather outside the replay
+would not show here; sixteen different prompts at once would.
