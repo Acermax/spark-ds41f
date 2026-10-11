@@ -161,3 +161,26 @@ The kernel bench cannot settle this. Serving can: the L2 prefetch stages each la
 WO weights ahead of the step. [r6e pieces window 1](../2026-10-11-r6e-candidate/w5.json)
 screens r6e + WO-BF16 (vLLM `r6e-wobf16` `25d1f3cf2`: these commits on r6e) against r6e,
 with the acceptance sweep because BF16 WO-A changes the bits.
+
+### r6e pieces window 1: r6e + WO-BF16 (2026-10-11, 15:46-15:54 UTC)
+
+- **Kernel bundle:** WO tests passed on the r6e tree.
+- **Determinism failed.** mixed15 had 9 of 16 requests differ (r6e: 1), most from the
+  first token's logprobs.
+- **Speed:** paired decode was level (+0.9% ±2.4%, acceptance sweep), 1K prefill
+  +2.7%, 16K level.
+- **Cause:** the WO switch (written against r6d) finished a sequence-parallel step
+  with a plain reduce-scatter.
+  - r6e keeps those outputs as unreduced rank-order parts (`project_reduce_scatter`),
+    which mHC sums in rank order, as the non-SP all-reduce does.
+  - The plain reduce-scatter summed in another order, so prompts prefilled
+    sequence-parallel (mixed15's fifteen prompts together) rounded otherwise.
+
+vLLM `8e6ac25a6` projects the TileLang WO through `project_reduce_scatter` in the same
+slices as the B12X path.
+
+## Window 6 ([w6.json](w6.json))
+
+The WO tests, then r6e + WO-BF16 on the fix alone, with determinism, distinct prompts,
+mixed traffic and the acceptance sweep. Its numbers compare with pieces window 1's r6e
+arm from the same session.
