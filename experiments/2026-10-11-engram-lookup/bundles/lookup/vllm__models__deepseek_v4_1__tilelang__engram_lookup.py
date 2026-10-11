@@ -14,7 +14,9 @@ per token and head).
 reader stages the step's rows there); otherwise the weight holds the shard's rows,
 indexed ``row - start``. ``resident_scales`` reads the scales by shard row even when
 the weight is compact. Each thread converts sixteen values: one 16-byte load, two
-16-byte stores.
+16-byte stores. Small steps spread over more, smaller blocks (two (token, head) pairs
+a 32-thread block up to ``SMALL_TOKENS``): every thread computes the same values
+either way, so the launch shape does not change a bit.
 """
 
 # No `from __future__ import annotations`: TileLang reads the prim_func
@@ -28,6 +30,7 @@ WIDTH = 256  # values per row
 SF_BLOCK = 32  # values per E8M0 scale byte
 _VEC = 16  # values per thread
 _LANES = WIDTH // _VEC  # threads per (token, head)
+SMALL_TOKENS = 48  # steps up to this many tokens use two pairs a block
 
 
 @tilelang.jit(pass_configs={tilelang.PassConfigKey.TL_DISABLE_WARP_SPECIALIZED: True})
@@ -64,34 +67,33 @@ def engram_lookup_kernel(
             if pair < P * HEADS:
                 t = pair // HEADS
                 head = pair % HEADS
-                # Every load issues at once: the hash and the live count do not gate
-                # the row loads (a compact slot's row is its own position; a shard row
-                # is clamped to 0 when not local), and dead slots select zero after.
                 live_count = num_tokens[0]
-                row = hashes[t, head]
                 live = (t < live_count) & (live_count >= 0) & (live_count <= max_tokens)
+                row = T.if_then_else(live, hashes[t, head], T.int64(-1))
                 local = live & (row >= start) & (row < end) & (row < rows)
                 shard_row = T.if_then_else(local, row - start, T.int64(0))
                 weight_row = T.Cast(T.int64, pair) if compact else shard_row
                 scale_row = shard_row if resident_scales else weight_row
-                for v in T.vectorized(_VEC):
-                    quant[v] = weight[weight_row, c0 + v]
-                exponent = T.Cast(T.uint32, scales[scale_row, c0 // SF_BLOCK])
-                scale = T.if_then_else(
-                    exponent == T.uint32(0),
-                    T.float32(2.0**-127),
-                    T.if_then_else(
-                        exponent == T.uint32(255),
-                        T.reinterpret(T.uint32(0x7FC00000), T.float32),
-                        T.reinterpret(T.shift_left(exponent, 23), T.float32),
-                    ),
-                )
-                for v in T.unroll(_VEC):
-                    result[v] = T.if_then_else(
-                        local,
-                        T.Cast(T.bfloat16, T.Cast(T.float32, quant[v]) * scale),
-                        T.Cast(T.bfloat16, T.float32(0)),
+                if local:
+                    for v in T.vectorized(_VEC):
+                        quant[v] = weight[weight_row, c0 + v]
+                    exponent = T.Cast(T.uint32, scales[scale_row, c0 // SF_BLOCK])
+                    scale = T.if_then_else(
+                        exponent == T.uint32(0),
+                        T.float32(2.0**-127),
+                        T.if_then_else(
+                            exponent == T.uint32(255),
+                            T.reinterpret(T.uint32(0x7FC00000), T.float32),
+                            T.reinterpret(T.shift_left(exponent, 23), T.float32),
+                        ),
                     )
+                    for v in T.unroll(_VEC):
+                        result[v] = T.Cast(
+                            T.bfloat16, T.Cast(T.float32, quant[v]) * scale
+                        )
+                else:
+                    for v in T.unroll(_VEC):
+                        result[v] = T.Cast(T.bfloat16, T.float32(0))
                 for v in T.vectorized(_VEC):
                     out[t, head * WIDTH + c0 + v] = result[v]
 
@@ -121,9 +123,10 @@ def engram_lookup(
     if not 0 <= prepared <= max_tokens:
         raise ValueError(f"prepared tokens {prepared} outside [0, {max_tokens}]")
     if prepared:
-        engram_lookup_kernel(max_tokens, rows, start, end, compact, resident_scales)(
-            weight, scales.view(torch.uint8), hashes[:prepared], num_tokens, out
-        )
+        pairs = 2 if prepared <= SMALL_TOKENS else 16
+        engram_lookup_kernel(
+            max_tokens, rows, start, end, compact, resident_scales, pairs
+        )(weight, scales.view(torch.uint8), hashes[:prepared], num_tokens, out)
     if clear_tail and prepared < out.shape[0]:
         out[prepared:].zero_()
     return out

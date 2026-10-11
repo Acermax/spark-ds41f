@@ -45,3 +45,14 @@ All 70 tests passed: every output identical to Triton's.
 The decode metadata writes both for the same rows back to back, so the follow-up
 (vLLM, top of `r6d-metadata`) writes them in one launch. Window 2
 ([w2.json](w2.json)) is the kernel bundle again, kernel only.
+
+### Window 2 (2026-10-11, 12:24 UTC, kernel only)
+
+85 tests passed. The fused launch beat Triton's pair warm at every size (0.77-0.98x),
+but cold it lost:
+- decode was level at the timer's resolution;
+- prefill was 14-17% slower (14.1 against 12.1 us at 2048 rows), because one block a
+  row did both parts.
+
+vLLM `f23f050fc` gives each row a block for its window metadata and one for its page
+table, still one launch. Window 3 ([w3.json](w3.json)) is the kernel bundle again.
