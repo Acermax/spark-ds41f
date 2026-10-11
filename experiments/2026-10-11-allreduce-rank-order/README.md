@@ -104,3 +104,24 @@ with `--enforce-eager`. Both run `mixed15`. If "fixed" loses the difference, the
 verification length is involved; if "fixed" keeps it and "eager" loses it, the graphs or
 their padding are. The trace (`allreduce-trace.json`, now also without adaptive
 verification) runs last and localizes the difference if eager keeps it.
+
+Window 4 (2026-10-11, 13:21-13:33 UTC):
+- **`allreduce-fixed`** (CUDA graphs, adaptive verification off): mixed15 0/16 and
+  every other scenario identical. Its references equal r6d's (`6659a69ad547` /
+  `15c551803076`).
+- **`allreduce-eager`** (no graphs, adaptive verification off): the same, 0/16.
+
+So the one difference left with the rank-order all-reduce needs DSpark's adaptive
+verification. Adaptive verification trims each request's verified drafts on the GPU from
+batch-level cost curves, so the verify step's shape follows the batch. Graphs and their
+padding are not involved.
+
+The row trace (eager, adaptive verification off) reported digest differences in three
+rows between the prompt alone and mixed15, at layers 0-2. The tokens and logprobs are
+identical, and one of those rows ran in a step of the same size, so the trace's row
+matching (verify rows against draft rows) needs review before those differences mean
+anything.
+
+Next: localize the adaptive-verification difference. That needs a trace that records
+inside the graphs, because adaptive verification requires them, or a source audit of
+the kernels that see the trimmed batch's rows.
