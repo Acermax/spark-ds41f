@@ -224,10 +224,10 @@ def compress_kernel(ratio: int, max_requests: int, page: int, warps: int = 4):
                             x[c * _VEC + i] = T.float32(0)
                         ss[0] += x[c * _VEC + i] * x[c * _VEC + i]
                     if ratio == 2:
-                        # The live token's raw value and gate into its ring slot: only
-                        # a request's last ``page`` positions of the step, so each slot
-                        # holds its latest position (vLLM's Triton save let every
-                        # position of a long chunk race for its slot).
+                        # The live token's raw value and gate into its ring slot. The
+                        # metadata gives only a request's last ``page`` rows of the step
+                        # a ring slot (earlier rows would share slots); the kernel keeps
+                        # that bound itself as well.
                         slot = state_slots[token]
                         if (token < nt) & (slot >= page) & (token >= info[5] - page):
                             base = (slot % page) * STATE + col
