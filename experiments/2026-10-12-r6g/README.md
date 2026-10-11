@@ -65,3 +65,12 @@ all-greedy step whose logits nothing reads reduces each rank's shard to a
   logprobs run's).
 - Sixteen and eight different prompts at once (no logprobs: the greedy path) and
   real-row cost curves.
+
+## Window 3 ([w3.json](w3.json)): the greedy switch alone
+
+Window 2's r6g read +0.8% at sixteen prompts against the r6f arms' mean (+1.2% at
+eight), where window 1's fold alone read +1.4%: the greedy path's share is not visible
+at production shapes. The same overlay with `VLLM_GREEDY_VERIFICATION` on, off and on
+again, six samples of sixteen and eight different prompts, then a fixed-row profile of
+both (adaptive verification off): with the switch on the logits all-gather and the
+full-vocabulary passes must disappear.
