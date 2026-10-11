@@ -1,0 +1,37 @@
+{
+  "description": "FP32 vocabulary heads: their tests, in the r6d image.",
+  "image": "vllm-ds41f-kkref:19f2c20ed4d6-r6d",
+  "env": {
+    "HF_HUB_OFFLINE": "1"
+  },
+  "workdir": "/opt/spark3/candidate/vllm",
+  "argv": [
+    "-m",
+    "pytest",
+    "-q",
+    "--noconftest",
+    "-p",
+    "no:cacheprovider",
+    "-rfE",
+    "tests/kernels/quantization/test_deepseek_v41_tilelang_vocab.py"
+  ],
+  "verdict": "exit",
+  "mounts": [
+    [
+      "vllm__model_executor__layers__logits_processor.py",
+      "/opt/spark3/candidate/vllm/vllm/model_executor/layers/logits_processor.py"
+    ],
+    [
+      "vllm__model_executor__layers__quantization__online__packed_bf16.py",
+      "/opt/spark3/candidate/vllm/vllm/model_executor/layers/quantization/online/packed_bf16.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__tilelang__vocab.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/vocab.py"
+    ],
+    [
+      "tests__kernels__quantization__test_deepseek_v41_tilelang_vocab.py",
+      "/opt/spark3/candidate/vllm/tests/kernels/quantization/test_deepseek_v41_tilelang_vocab.py"
+    ]
+  ]
+}
