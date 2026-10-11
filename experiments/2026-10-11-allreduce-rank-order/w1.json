@@ -1,0 +1,89 @@
+{
+  "experiment": "experiments/2026-10-11-allreduce-rank-order",
+  "run": "allreduce-rank-order-w1",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "kernel",
+      "bundles": [
+        {
+          "node": "dgx1",
+          "bundle": "experiments/2026-10-11-allreduce-rank-order/bundles/allreduce"
+        }
+      ]
+    },
+    {
+      "kind": "fabric",
+      "config": "allreduce.json",
+      "script": "fabric_all_reduce.py",
+      "args": [
+        "--iters",
+        "20"
+      ],
+      "environment": {},
+      "label": "all-reduce"
+    },
+    {
+      "kind": "measure",
+      "profile": "lean",
+      "bracket": true,
+      "extras": [
+        [
+          "experiments/2026-10-09-tilelang-migration/token_determinism.py",
+          [
+            "--tokens",
+            "192",
+            "--long-lines",
+            "700",
+            "--wide"
+          ],
+          "determinism"
+        ],
+        [
+          "scripts/distinct_streams.py",
+          [
+            "--streams",
+            "1",
+            "--samples",
+            "3",
+            "--tokens",
+            "256"
+          ],
+          "c1-distinct"
+        ],
+        [
+          "scripts/distinct_streams.py",
+          [
+            "--streams",
+            "8",
+            "--samples",
+            "3",
+            "--tokens",
+            "256"
+          ],
+          "c8-distinct"
+        ],
+        [
+          "experiments/2026-09-29-determinism/mixed_latency.py",
+          [
+            "--rounds",
+            "3"
+          ],
+          "mixed"
+        ]
+      ],
+      "arms": [
+        {
+          "config": "experiments/2026-10-10-r6d-deterministic/r6d-tp4.json",
+          "label": "r6d"
+        },
+        {
+          "config": "allreduce.json",
+          "label": "allreduce"
+        }
+      ]
+    }
+  ]
+}
