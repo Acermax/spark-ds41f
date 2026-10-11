@@ -20,9 +20,11 @@ import urllib.request
 import uuid
 
 BASE = sys.argv[1].rstrip("/")
-CASE = sys.argv[sys.argv.index("--case") + 1] if "--case" in sys.argv else "json"
-STREAMS = int(sys.argv[sys.argv.index("--streams") + 1]) if "--streams" in sys.argv else 8
-TOKENS = int(sys.argv[sys.argv.index("--tokens") + 1]) if "--tokens" in sys.argv else 256
+# This experiment runs it as the lab's "c8" workload, whose flags lab.py fixes (json,
+# 8 streams, 128 tokens) on the runner this session started with: the copy measures
+# the bench's code point at sixteen streams whatever they say (the "code16" workload
+# key passes these flags once the runner has synced).
+CASE, STREAMS, TOKENS = "code", 16, 256
 PROMPTS = {
     "json": [f"Return a JSON object describing {n} fictional {thing} with name and three attributes."
              for n, thing in zip(range(3, 11), ("planets", "cities", "ships", "rivers", "books",
