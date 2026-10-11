@@ -160,3 +160,11 @@ The trace on vLLM `c54915432`. Each decoder layer records:
 The routers record every routed row's weights and expert ids under one label (`L<i>_route`)
 whichever path routed it, and its gate logits under the path's label. The first
 differing label inside layer 1 names the stage.
+
+## Window 6 ([w6.json](w6.json), kernel only)
+
+The router across step sizes. `test_gate_router_rows_do_not_depend_on_the_step`
+(vLLM `r6e-router-check`) routes a 6814-row batch, then its first 1-2048 rows. It
+requires every row's gate logits, expert ids and weights to equal the full batch's bit
+for bit. Small row counts take the fused gate router, larger ones the gate's in-kernel
+shards then TileKernels.
