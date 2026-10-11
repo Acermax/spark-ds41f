@@ -36,3 +36,41 @@ After re-cabling to the triangle, one job under the lab's `release-tp3` profile:
 
 Open the session with `--production-config config/cluster.json`, the TP3 production
 profile.
+
+## TP4 results (2026-10-11, 18:17-19:16 UTC)
+
+From `scripts/release_table.py r6f-release-tp4 r6d r6f`. Verdicts are against the
+combined 95% intervals.
+
+| metric | r6d | r6f | change | verdict |
+|---|---|---|---|---|
+| determinism (mixed15 differing) | 14/16 | 0/16, every scenario identical | | **better** |
+| quality | 5/5 | 5/5 | | same |
+| acceptance sweep tok/s (paired, 16 prompts) | | | -0.1% ±2.4% | same |
+| acceptance sweep accepted (paired) | | | +1.2% ±4.8% | same |
+| 1 distinct stream tok/s | 87.2 | 89.2 | +2.2% ±0.4% | faster |
+| 4 distinct streams | 132.1 | 133.1 | +0.7% ±2.4% | same |
+| 8 distinct streams | 175.8 | 175.4 | -0.2% ±1.1% | same |
+| 16 distinct streams | 222.1 | 218.0 | -1.8% ±0.6% | **slower** |
+| prefill 1K tok/s | 2389 | 2522 | +5.6% ±6.6% | same |
+| prefill 32K | 5780 | 5842 | +1.1% ±1.0% | faster |
+| prefill 128K | 5634 | 5763 | +2.3% ±1.4% | faster |
+| prefill 256K | 5398 | 5490 | +1.7% ±0.3% | faster |
+| prefill 512K | 4989 | 5064 | +1.5% ±0.4% | faster |
+| prefill 1M | 4321 | 4377 | +1.3% ±0.2% | faster |
+| short-prompt TTFT ms | 92.6 | 94.4 | +2.0% | same (no interval) |
+| mixed short / long TTFT ms | 224.8 / 902.5 | 228.1 / 906.3 | +1.5% / +0.4% | same (no interval) |
+| mixed stream gap p95 ms | 89.5 | 93.1 | +4.0% | slower (no interval, earlier runs ±5%) |
+
+The bench's single-prompt points follow the text (r6f's precision changes alter it):
+- prose c1 -8.5% (acceptance 1.26 to 1.06), c2-c8 +5.4 to +7.8%, c16 level;
+- code c1 +18.8%, c2-c8 +1.6 to +6.3%, c16 -5.3% (acceptance 1.30 to 1.52).
+
+Reading:
+- r6f is fully deterministic (r6d: 14 of 16 mixed15 requests differ) and computes
+  closer to DeepSeek's reference.
+- Prefill is faster at every size from 32K to 1M, by 1.1-2.3%; single-stream decode is
+  2.2% faster.
+- One measured loss: 16 distinct streams, -1.8%. Real-row cost curves put r6f's
+  per-step cost 1-5% above r6d's at large batches. The reference-precision pieces add
+  it: FP32 head logits, the three-part FP32 mHC projection, the FP32 MoE partial path.
