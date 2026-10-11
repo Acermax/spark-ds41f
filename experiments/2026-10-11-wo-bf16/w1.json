@@ -60,6 +60,14 @@
             "3"
           ],
           "mixed"
+        ],
+        [
+          "scripts/acceptance_sweep.py",
+          [
+            "--tokens",
+            "256"
+          ],
+          "sweep"
         ]
       ],
       "arms": [

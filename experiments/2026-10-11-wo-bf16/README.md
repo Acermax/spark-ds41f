@@ -24,7 +24,9 @@ The WO tests in the r6d image (WO-A within one BF16 rounding of FP64, far inside
 MXFP8 activations give; batch-invariant) and B1's bench against B12X's fused WO (error
 no worse, invariance, time per call warm and cold at every decode and prefill size;
 fails if TileLang is more than 3% slower anywhere), then the lean screen bracketed by
-r6d.
+r6d, with the sixteen-prompt acceptance sweep
+([precision-acceptance](../2026-10-11-precision-acceptance/README.md)) because the
+change moves temperature-0 text.
 
 Acceptance: temperature-0 identical within the arm; the bench at or above B12X at every
 size; decode and prefill at or above r6d.
