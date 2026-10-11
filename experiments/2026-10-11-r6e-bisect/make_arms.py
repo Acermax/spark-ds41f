@@ -7,6 +7,10 @@ Each arm mounts every vLLM file that commits up to its prefix change, at that pr
 the r6d image. The head stays BF16 (r6d's VLLM_DS41_HEAD_DTYPE=model) until the FP32-head
 commit, as in the r6e stack.
 
+Window 2's arm: r6e-trace, the full candidate without adaptive verification and without
+CUDA graphs, with the debug row trace (vLLM branch r6e-trace). Without a trace spec the
+trace does nothing, so the same arm first checks that the difference survives eager.
+
 usage: make_arms.py [--vllm ~/projects/vllm-ds41-tilelang-migration]
 """
 import argparse
@@ -20,6 +24,7 @@ REL = HERE.relative_to(ROOT).as_posix()
 BASE = ROOT / "experiments/2026-10-10-r6d-deterministic/r6d-tp4.json"
 R6D = "r6d-candidate"  # the vLLM branch of the r6d image's tree
 TREE = "/opt/spark3/candidate/vllm"
+TRACE = "362b78b80"  # r6e-draft2 + the debug row trace (VLLM_DS41_ROW_TRACE_DIR)
 # (label, r6e-draft2 commit, FP32 head): each prefix adds one piece.
 PREFIXES = [
     ("p1-allreduce", "a0d2d1fd1", False),  # SP WO slices, fused SP sum, rank-order all-reduce
@@ -59,6 +64,22 @@ def main():
         cluster["serve_args"][at] = json.dumps(speculative, separators=(",", ":"))
         (HERE / f"{label}.json").write_text(json.dumps(cluster, indent=2) + "\n")
         print(f"{label}: {commit}, {len(files)} files, head {'float32' if fp32_head else 'model'}")
+    # Window 2: the full candidate without adaptive verification, eager, then traced.
+    fixed = json.loads((ROOT / "experiments/2026-10-11-r6e-candidate/r6e-fixed.json").read_text())
+    eager = json.loads(json.dumps(fixed))
+    eager["serve_args"] = [*eager["serve_args"], "--enforce-eager"]
+    files = [p for p in git("diff", "--name-only", R6D, TRACE).decode().split() if p.startswith("vllm/")]
+    for path in files:
+        out = HERE / "overlay" / "trace" / path
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(git("show", f"{TRACE}:{path}"))
+    trace = json.loads(json.dumps(eager))
+    trace["container"]["mounts"] = [m for m in trace["container"]["mounts"] if "/overlay/r6e/" not in m[0]]
+    trace["container"]["mounts"] += [
+        [f"{{home}}/projects/spark-ds41f/{REL}/overlay/trace/{path}", f"{TREE}/{path}", "ro"] for path in files]
+    trace["environment"]["VLLM_DS41_ROW_TRACE_DIR"] = "/cache/row-trace"
+    (HERE / "r6e-trace.json").write_text(json.dumps(trace, indent=2) + "\n")
+    print(f"r6e-trace: {TRACE}, {len(files)} files, eager")
 
 
 if __name__ == "__main__":
