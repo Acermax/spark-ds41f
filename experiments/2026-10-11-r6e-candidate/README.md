@@ -150,3 +150,20 @@ r6e / fold / wobf16 / r6e bracket:
 
 [w4.json](w4.json)'s bench on the r6e-fold arm: the candidate is r6e with the MoE fold,
 which keeps r6e's bits.
+
+### Promotion bench on r6e + fold (2026-10-11, 16:14-16:25 UTC)
+
+Against r6d's reference (`2026-10-10-karmic-kraken-r6d-tp4`):
+- **Quality:** 5/5.
+- **Prefill:** +1.7% at 32K, +1.3% at 256K, +1.5% at 500K.
+- **Decode tok/s:** prose c1 -8.4% (the known single-prompt text effect), prose c2-c16
+  +0.1 to +4.6%, code c1 +18.6%, code c2/c4 level, code c8 +6.7%, code c16 -7.2%
+  (interval -14.0 to -0.3%, n=3).
+- **Step time:** flagged at code c2 (+20.5%) and code c16 (+18.7%). With adaptive
+  verification a step's verified tokens follow acceptance, and code c2's tok/s is level.
+
+The bench exits 1 on the four flags. Its decode points are single prompts, whose text
+changes with r6e's precision (both directions, up to ±20%), and the reference was
+measured a day earlier on another boot. [w7.json](w7.json) benches r6d in the same
+session for a like-for-like reading. Both runs carry the acceptance sweep for the
+prompt-by-prompt comparison.
