@@ -51,3 +51,12 @@ Acceptance:
   throughput), and every metric above B12X's;
 - then the promotion bench at the recipe limits (TP4, 1M context, 16 streams) and the
   owner's decision.
+
+## Adaptive verification window 1 ([w3.json](w3.json))
+
+The candidate with and without DSpark's adaptive verification (`r6e-fixed.json`: every
+draft token verified), bracketed by the candidate. All-reduce window 4 found that the
+last mixed15 difference needs adaptive verification on.
+- **If the fixed arm is fully deterministic:** its speed cost decides between turning
+  adaptive verification off and localizing the difference with a graph-safe trace.
+- **If it is not:** the difference has another cause.
