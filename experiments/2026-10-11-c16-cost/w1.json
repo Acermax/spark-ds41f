@@ -1,0 +1,25 @@
+{
+  "experiment": "experiments/2026-10-11-c16-cost",
+  "run": "c16-cost-w1",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "measure",
+      "bench": false,
+      "bracket": false,
+      "extras": [],
+      "arms": [
+        {
+          "config": "r6d-profiled.json",
+          "label": "r6d"
+        },
+        {
+          "config": "r6f-profiled.json",
+          "label": "r6f"
+        }
+      ]
+    }
+  ]
+}
