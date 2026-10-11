@@ -24,6 +24,7 @@ REL = HERE.relative_to(ROOT).as_posix()
 BASE = ROOT / "experiments/2026-10-10-r6d-deterministic/r6d-tp4.json"
 R6D = "r6d-candidate"  # the vLLM branch of the r6d image's tree
 TREE = "/opt/spark3/candidate/vllm"
+ROUTER = "56bb63bb4"  # r6e-draft2 + a router test across step sizes
 TRACE = "c54915432"  # r6e-draft2 + the debug row trace (SP parts, Engram, layer stages, routing)
 # (label, r6e-draft2 commit, FP32 head): each prefix adds one piece.
 PREFIXES = [
@@ -80,6 +81,22 @@ def main():
     trace["environment"]["VLLM_DS41_ROW_TRACE_DIR"] = "/cache/row-trace"
     (HERE / "r6e-trace.json").write_text(json.dumps(trace, indent=2) + "\n")
     print(f"r6e-trace: {TRACE}, {len(files)} files, eager")
+    # The router across step sizes: the r6e tree and the router tests, kernel only.
+    test = "tests/kernels/moe/test_deepseek_v41_tilelang_router.py"
+    files = [p for p in git("diff", "--name-only", R6D, ROUTER).decode().split() if p.startswith("vllm/")]
+    bundle = HERE / "bundles" / "router"
+    bundle.mkdir(parents=True, exist_ok=True)
+    mounts = []
+    for path in [*files, test]:
+        name = path.replace("/", "__")
+        (bundle / name).write_bytes(git("show", f"{ROUTER}:{path}"))
+        mounts.append([name, f"{TREE}/{path}"])
+    candidate = {"description": "The r6e router tests, a token's routing across step sizes included.",
+                 "image": base["container"]["image"], "env": {"HF_HUB_OFFLINE": "1"}, "workdir": TREE,
+                 "argv": ["-m", "pytest", "-q", "--noconftest", "-p", "no:cacheprovider", "-rfE", test],
+                 "verdict": "exit", "mounts": mounts}
+    (bundle / "candidate.json").write_text(json.dumps(candidate, indent=2) + "\n")
+    print(f"bundles/router: {ROUTER}, {len(files)} files")
 
 
 if __name__ == "__main__":
