@@ -75,3 +75,17 @@ vLLM `b72a66fa4` goes back to the gated loads and spreads small steps:
 - the same values per thread, so the same bits.
 
 Window 3 ([w3.json](w3.json)) is the kernel bundle again.
+
+### Window 3 (2026-10-11, 12:53 UTC, kernel only)
+
+13 tests passed. Small steps over more blocks helped only a little, and the bar is not
+met at small sizes:
+
+| tokens | disk (mapped host) warm vs B12X | resident warm vs B12X |
+|---|---|---|
+| 1-32 | 1.98 against 1.47 us at 1 (1.11-1.35x) | 1.77 against 1.26 us at 1 (1.11-1.41x) |
+| 48-64 | 1.01-1.08x | 1.00-1.03x |
+| 96+ | 0.81-0.97x | 0.78-0.97x |
+
+About 0.5 us a call stays fixed whatever the launch shape. Locating it needs a profiler
+trace of both kernels at one token.
