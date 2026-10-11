@@ -26,3 +26,11 @@ as r6d did.
 
 Promotion itself (root lock, profile, baseline, bench reference, docs) follows the
 owner's decision.
+
+## TP3
+
+[r6f-tp3.json](r6f-tp3.json) is r6d-tp3 (the triangle profile) with r6f's image, tree
+label, lock and the FP32 head. Every r6e piece was validated on TP4 only. On the
+triangle r6f needs the image (built and copied over the triangle's CX7 links), a lean
+gate with determinism, and the TP3 recipe bench (8 streams at 512K). TP3 production is
+r6 on its frozen lock.
