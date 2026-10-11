@@ -91,3 +91,16 @@ cause is the graphs or their padding. Its second job localizes it if it stays:
 `8fd502d47`, `VLLM_DS41_ROW_TRACE_DIR=/cache/row-trace`) and
 [row_trace_session.py](row_trace_session.py), which traces the rows feeding prompt
 11's tokens 4-9 alone and in mixed15 and reports the first layer whose digests differ.
+
+Window 3 (2026-10-11, 08:58 UTC) did not boot: vLLM refuses DSpark's adaptive
+verification without full CUDA graphs ("Adaptive verification requires full CUDA
+graphs"), so the eager arm stopped at configuration on every rank and the window closed;
+production was restored at 09:00. The arm's code never ran.
+
+Window 4 ([w4.json](w4.json)) splits the bisect so each arm changes one thing:
+`allreduce-fixed.json` keeps the CUDA graphs and turns adaptive verification off (every
+draft token verified, as the eager path must), and `allreduce-eager.json` is that arm
+with `--enforce-eager`. Both run `mixed15`. If "fixed" loses the difference, the variable
+verification length is involved; if "fixed" keeps it and "eager" loses it, the graphs or
+their padding are. The trace (`allreduce-trace.json`, now also without adaptive
+verification) runs last and localizes the difference if eager keeps it.
