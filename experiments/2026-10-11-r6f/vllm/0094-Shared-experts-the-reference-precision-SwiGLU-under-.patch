@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Christopher Owen <3221756+christopherowen@users.noreply.github.com>
+Date: Sun, 11 Oct 2026 09:41:20 +0200
+Subject: [PATCH 094/110] Shared experts: the reference-precision SwiGLU under
+ the TileLang kernel backend
+
+(cherry picked from commit 94f08a8744f49277c3209e3942a7933137d8dd25)
+---
+ vllm/models/deepseek_v4_1/kernels.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/vllm/models/deepseek_v4_1/kernels.py b/vllm/models/deepseek_v4_1/kernels.py
+index 91559f9db..ce590b528 100644
+--- a/vllm/models/deepseek_v4_1/kernels.py
++++ b/vllm/models/deepseek_v4_1/kernels.py
+@@ -81,7 +81,7 @@ def shared_expert_activation(act_fn: nn.Module) -> nn.Module:
+ 
+ 
+ # The shared expert's SwiGLU at the reference's precision under the TileLang family.
+-SHARED_SWIGLU_FP32 = False
++SHARED_SWIGLU_FP32 = True
+ 
+ 
+ def moe_router_class():
+-- 
+2.54.0 (Apple Git-157)
+
