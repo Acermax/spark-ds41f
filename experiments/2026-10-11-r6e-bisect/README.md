@@ -186,3 +186,31 @@ TileKernels. The routing is not the batch dependence.
 ## Window 7 ([w7.json](w7.json))
 
 Window 5's trace on `f9669d2c4`.
+
+### Window 7 results (2026-10-11, 16:12-16:14 UTC): the cause
+
+Row 21 (generated, inside the 6814-row mixed step) is identical up to
+`L1_attn_in`. **Its first differing label is `L1_attn_out`**: layer 1's attention
+gives the same input a different output. Rows 22-23 first differ at `L2_attn_out`.
+
+The attention runs B12X's `compressed_sparse_mla` with one plan per step
+(`forward_mqa`):
+
+```python
+mode = "decode" if swa.is_decode else "extend"
+```
+
+A step that holds any prefill (here a chunk of the long prompt) runs every row on the
+extend plan, the decode requests' rows included. The same rows in a pure decode step
+run on the decode plan. The plans tile and accumulate differently, so a decode row's
+attention output depends on whether a prefill shares its step.
+- The FP32 differences are ulp-sized and flip a BF16 output only now and then. That
+  is why layer 0 happened to stay identical and why the affected prompt moves with the
+  numbers (prompt 11 in the all-reduce arm, prompt 4 here).
+- Adaptive verification only changes which steps a prefill lands in (the all-reduce
+  arm's case).
+
+The fix: a row's attention arithmetic must not depend on the step. Either the decode
+requests of a mixed step take the decode plan (the batch split by request, vLLM's
+usual layout), or the TileLang sparse-MLA port gives decode and extend rows the same
+per-row arithmetic. The second port is planned anyway.
