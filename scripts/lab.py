@@ -120,8 +120,10 @@ PROFILES["release"] = {
                    "--prefill-repeats", "3", "--compare", "none"],
     "extras": [(_DETERMINISM, ["--tokens", "192", "--long-lines", "700", "--wide"], "determinism"),
                ("scripts/acceptance_sweep.py", ["--tokens", "256"], "sweep"),
+               # One stream: twelve prompts one at a time (distinct_streams.py --streams 1 is one prompt).
+               (f"{_LATENCY}/c1_distinct.py", ["--tokens", "256", "--prompts", "12"], "c1-distinct"),
                *[("scripts/distinct_streams.py", ["--streams", str(n), "--samples", str(s), "--tokens", "256"],
-                  f"c{n}-distinct") for n, s in ((1, 3), (4, 3), (8, 4), (16, 4))],
+                  f"c{n}-distinct") for n, s in ((4, 3), (8, 4), (16, 4))],
                (f"{_LATENCY}/ttft_short.py", ["--reps", "3"], "ttft"),
                (f"{_LATENCY}/mixed_latency.py", ["--rounds", "3"], "mixed")],
     "table": "scripts/release_table.py",

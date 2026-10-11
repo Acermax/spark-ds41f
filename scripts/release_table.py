@@ -126,8 +126,9 @@ def main():
         for streams in DISTINCT:
             a_s, b_s = summary(run, f"c{streams}-distinct", base), summary(run, f"c{streams}-distinct", arm)
             if a_s and b_s:
-                print(row(f"{streams} distinct streams tok/s", a_s["tps_mean"], b_s["tps_mean"],
-                          a_s["ci95_pct"], b_s["ci95_pct"]))
+                label = ("1 stream, 12 prompts in turn" if streams == 1
+                         else f"{streams} different prompts at once")
+                print(row(f"{label} tok/s", a_s["tps_mean"], b_s["tps_mean"], a_s["ci95_pct"], b_s["ci95_pct"]))
 
         print("prefill tok/s (cold, source text)")
         pa = suites[base].get("prefill", {}).get("points", {})
