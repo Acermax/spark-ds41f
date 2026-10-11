@@ -106,3 +106,18 @@ The owner's acceptance is one bench at the recipe limits, the r6d gate's:
 The arm is the overlay over the r6d image; promotion bakes the same sources into an
 image. The bisect's fix, if it changes a kernel's arithmetic only, leaves these
 numbers standing.
+
+## Pieces window 1 ([w5.json](w5.json))
+
+Two candidate pieces on r6e, each against r6e (bracketed):
+- **fold** ([moe-fold](../2026-10-11-moe-fold/README.md)): the MoE combine adds the
+  shared expert's output when the shared expert runs first. Its references must equal
+  r6e's bit for bit, and prefill should gain about 1%.
+- **wobf16** ([wo-bf16](../2026-10-11-wo-bf16/README.md)): WO-A on BF16 activations as
+  DeepSeek's reference, with the per-bucket split-K tiles. It changes the bits, so the
+  acceptance sweep compares it prompt by prompt.
+
+The kernel bundles first: the MoE tests on dgx1, the WO tests on dgx2. Then the lean
+screen with determinism, distinct prompts, mixed traffic and the acceptance sweep. The
+promotion bench ([w4.json](w4.json)) follows, on r6e or on r6e with the pieces that
+pass.

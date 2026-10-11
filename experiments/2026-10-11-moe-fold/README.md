@@ -20,11 +20,12 @@ result does not depend on which path its step takes.
 `test_moe_experts_fold_shared` checks the folded combine bit for bit against both
 runner paths (the all-reduce add and the reduce-scatter buffer).
 
-## Window 1 ([w1.json](w1.json))
+## Window 1 (in [r6e pieces window 1](../2026-10-11-r6e-candidate/w5.json))
 
 1. Kernel bundle: the MoE tests at `7ec14fee1`, in the r6d image.
-2. Lean screen, r6e / r6e-fold / r6e bracket, with `token_determinism.py --wide`,
-   distinct prompts and mixed traffic.
+2. Lean screen bracketed by r6e, beside the r6e + WO-BF16 arm, with
+   `token_determinism.py --wide`, distinct prompts, mixed traffic and the acceptance
+   sweep.
 
 Acceptance:
 - the references equal r6e's bit for bit (the long prompt alone prefills
