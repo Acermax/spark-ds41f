@@ -43,11 +43,21 @@ def main():
     sync = json.loads(json.dumps(cluster))
     sync["environment"]["SPARK3_ENGRAM_ASYNC"] = "0"
     (HERE / "allreduce-sync.json").write_text(json.dumps(sync, indent=2) + "\n")
-    # Window 3's bisect: the same arm without CUDA graphs (decode steps unpadded, eager).
-    eager = json.loads(json.dumps(cluster))
+    # Window 4's bisect, one variable an arm: DSpark's adaptive verification needs full CUDA
+    # graphs (vLLM refuses it under --enforce-eager, window 3), so "fixed" keeps the graphs
+    # and verifies every draft token; "eager" is "fixed" without graphs.
+    fixed = json.loads(json.dumps(cluster))
+    serve = fixed["serve_args"]
+    at = serve.index("--speculative-config") + 1
+    speculative = json.loads(serve[at])
+    speculative["enable_adaptive_verification"] = False
+    speculative.pop("adaptive_verification_cost_scale", None)
+    serve[at] = json.dumps(speculative, separators=(",", ":"))
+    (HERE / "allreduce-fixed.json").write_text(json.dumps(fixed, indent=2) + "\n")
+    eager = json.loads(json.dumps(fixed))
     eager["serve_args"] = [*eager["serve_args"], "--enforce-eager"]
     (HERE / "allreduce-eager.json").write_text(json.dumps(eager, indent=2) + "\n")
-    # Window 3's trace: eager, with the debug row trace (vLLM r6d-row-trace) mounted too.
+    # The trace: eager, with the debug row trace (vLLM r6d-row-trace) mounted too.
     traced = git("diff", "--name-only", R6D, TRACE, "--", "vllm").decode().split()
     for path in traced:
         out = HERE / "overlay" / "trace" / path
