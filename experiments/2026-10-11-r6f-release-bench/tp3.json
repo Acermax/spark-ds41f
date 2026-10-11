@@ -1,0 +1,24 @@
+{
+  "experiment": "experiments/2026-10-11-r6f-release-bench",
+  "run": "r6f-release-tp3",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "measure",
+      "profile": "release-tp3",
+      "bracket": false,
+      "arms": [
+        {
+          "config": "experiments/2026-10-10-r6d-deterministic/r6d-tp3.json",
+          "label": "r6d"
+        },
+        {
+          "config": "r6f-tp3-overlay.json",
+          "label": "r6f"
+        }
+      ]
+    }
+  ]
+}
