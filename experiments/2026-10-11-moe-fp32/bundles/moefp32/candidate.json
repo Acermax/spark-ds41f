@@ -1,0 +1,54 @@
+{
+  "description": "MoE FP32 partials and the FP32 rank-order sum: their tests, in the r6d image.",
+  "image": "vllm-ds41f-kkref:19f2c20ed4d6-r6d",
+  "env": {
+    "HF_HUB_OFFLINE": "1"
+  },
+  "workdir": "/opt/spark3/candidate/vllm",
+  "argv": [
+    "-m",
+    "pytest",
+    "-q",
+    "--noconftest",
+    "-p",
+    "no:cacheprovider",
+    "-rfE",
+    "tests/kernels/test_deepseek_v41_tilelang_collectives.py",
+    "tests/kernels/moe/test_deepseek_v41_tilelang_moe.py"
+  ],
+  "verdict": "exit",
+  "mounts": [
+    [
+      "vllm__distributed__device_communicators__cuda_communicator.py",
+      "/opt/spark3/candidate/vllm/vllm/distributed/device_communicators/cuda_communicator.py"
+    ],
+    [
+      "vllm__model_executor__layers__fused_moe__fused_moe_method_base.py",
+      "/opt/spark3/candidate/vllm/vllm/model_executor/layers/fused_moe/fused_moe_method_base.py"
+    ],
+    [
+      "vllm__model_executor__layers__fused_moe__tilelang.py",
+      "/opt/spark3/candidate/vllm/vllm/model_executor/layers/fused_moe/tilelang.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__kernels.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/kernels.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__tilelang__collectives.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/collectives.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__tilelang__moe.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/moe.py"
+    ],
+    [
+      "tests__kernels__test_deepseek_v41_tilelang_collectives.py",
+      "/opt/spark3/candidate/vllm/tests/kernels/test_deepseek_v41_tilelang_collectives.py"
+    ],
+    [
+      "tests__kernels__moe__test_deepseek_v41_tilelang_moe.py",
+      "/opt/spark3/candidate/vllm/tests/kernels/moe/test_deepseek_v41_tilelang_moe.py"
+    ]
+  ]
+}
