@@ -196,13 +196,16 @@ shown with its combined 95% interval and counts (**bold**) only beyond it.
 | Decode, 8 different prompts at once | 175.8 | 175.4 (-0.2% ±1.1) | 136.1 | 135.0 (-0.8% ±1.0) |
 | Decode, 16 different prompts at once | 222.1 | 218.0 (**-1.8%** ±0.6) | | |
 
-The reference-precision arithmetic makes each step 1-5% more expensive at a
-fixed batch size (real-row cost profiles of both releases), more on three
-nodes, where each rank holds a third of the vocabulary and experts. The pieces
-that leave the bits unchanged (the sequence-parallel overlap, the fused sum,
-the rank-order collectives and the new TileLang kernels) recover most of it:
-on four nodes prefill is faster at every size and decode is level, or within
-2% at sixteen streams. The bench's concurrent decode points send one prompt to
+Real-row cost profiles of both releases put r6f's steps 1-5% above r6d's at
+a fixed batch size; what r6f adds to a decode step is mostly the
+reference-precision arithmetic, which costs more on three nodes, where each
+rank holds a third of the vocabulary and experts. The pieces that leave the
+bits unchanged pay for it on prefill: the sequence-parallel WO overlap (+2% at
+16K) and fused sum (about +1%), and the shared expert folded into the MoE
+combine (about +1%). The new TileLang kernels are each faster per call than
+what they replaced but a small share of a decode step. On four nodes prefill
+is faster at every size and decode is level, or 1.8% behind at sixteen
+streams. The bench's concurrent decode points send one prompt to
 every stream, so they follow the text, which a precision change alters; the
 release comparison judges throughput on different prompts at once and on the
 paired sweep. The r6f arms mounted r6f's sources on the r6d image; the
