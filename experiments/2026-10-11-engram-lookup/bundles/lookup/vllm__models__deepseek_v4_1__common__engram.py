@@ -195,17 +195,20 @@ direct_register_custom_op(
 
 @lru_cache(maxsize=2)
 def _tilelang_lookup_kernel(state):
-    """The TileLang Engram lookup for a prepared lookup state, compiled once."""
+    """The TileLang Engram lookups for a prepared lookup state (both block shapes),
+    compiled once."""
     from vllm.models.deepseek_v4_1.tilelang.engram_lookup import engram_lookup_kernel
 
-    return engram_lookup_kernel(
-        state.caps.max_tokens,
-        state.table_rows,
-        state.shard_start,
-        state.shard_end,
-        state.compact_rows,
-        state.resident_scales,
-    )
+    for pairs in (2, 16):
+        engram_lookup_kernel(
+            state.caps.max_tokens,
+            state.table_rows,
+            state.shard_start,
+            state.shard_end,
+            state.compact_rows,
+            state.resident_scales,
+            pairs,
+        )
 
 
 def _decode_rows(binding, prepared: int, clear_tail: bool) -> None:

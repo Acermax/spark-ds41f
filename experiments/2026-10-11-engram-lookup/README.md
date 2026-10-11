@@ -62,3 +62,16 @@ vLLM `91eb87dcf` issues every load at once, with the same bits:
 
 Window 2 ([w2.json](w2.json)) is the kernel bundle again, tests and bench, kernel only.
 The serving screen of window 1 stands: the bits are unchanged.
+
+### Window 2 (2026-10-11, 12:23 UTC, kernel only)
+
+Issuing every load at once was slower still at 1-48 tokens: 2.6-2.9 us against B12X's
+1.3-1.9, where the first version took 2.0-2.3. The cost is the launch shape, not the
+load chain. A one-token step ran on two 256-thread blocks where B12X spreads 24 programs
+over 24 SMs.
+
+vLLM `b72a66fa4` goes back to the gated loads and spreads small steps:
+- two (token, head) pairs a 32-thread block up to 48 tokens, sixteen above;
+- the same values per thread, so the same bits.
+
+Window 3 ([w3.json](w3.json)) is the kernel bundle again.
