@@ -1,0 +1,86 @@
+{
+  "experiment": "experiments/2026-10-12-r6g",
+  "run": "r6g-greedy-w2",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "kernel",
+      "bundles": [
+        {
+          "node": "dgx1",
+          "bundle": "experiments/2026-10-12-r6g/bundles/r6g"
+        }
+      ]
+    },
+    {
+      "kind": "measure",
+      "bench": false,
+      "bracket": false,
+      "extras": [
+        [
+          "experiments/2026-10-12-r6g/token_determinism_text.py",
+          [
+            "--tokens",
+            "192",
+            "--long-lines",
+            "700",
+            "--wide"
+          ],
+          "determinism"
+        ],
+        [
+          "experiments/2026-10-12-r6g/token_determinism_text.py",
+          [
+            "--tokens",
+            "192",
+            "--long-lines",
+            "700",
+            "--wide",
+            "--no-logprobs"
+          ],
+          "greedy"
+        ],
+        [
+          "scripts/distinct_streams.py",
+          [
+            "--streams",
+            "16",
+            "--samples",
+            "4",
+            "--tokens",
+            "256"
+          ],
+          "c16-distinct"
+        ],
+        [
+          "scripts/distinct_streams.py",
+          [
+            "--streams",
+            "8",
+            "--samples",
+            "4",
+            "--tokens",
+            "256"
+          ],
+          "c8-distinct"
+        ]
+      ],
+      "arms": [
+        {
+          "config": "w2-r6f.json",
+          "label": "r6f"
+        },
+        {
+          "config": "w2-r6g.json",
+          "label": "r6g"
+        },
+        {
+          "config": "w2-r6f-again.json",
+          "label": "r6f-again"
+        }
+      ]
+    }
+  ]
+}
