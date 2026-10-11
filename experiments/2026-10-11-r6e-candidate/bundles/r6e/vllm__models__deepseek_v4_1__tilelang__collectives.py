@@ -9,9 +9,7 @@ sequence parallelism uses from 205 rows, adds a chunk around the ring starting
 after its owner and rounds to BF16 after every hop: a row's bits change with the
 step's row count. ``reduce_scatter_rank_order`` exchanges the chunks unreduced
 (NCCL send/recv on the same communicator, the same bytes) and adds them as the
-one-shot all-reduce does, so a row reduces to the same bits on every path. FP32
-partials (the MoE's, kept unrounded until the layer output) add the same way and
-round nothing.
+one-shot all-reduce does, so a row reduces to the same bits on every path.
 
 At four ranks only the neighbours (rank +-1, the ring4 cable order sparknet and
 NCCL use) exchange: each half of the opposite rank's chunk is relayed through one
@@ -26,25 +24,21 @@ import tilelang
 import tilelang.language as T
 import torch
 
-_VEC = {torch.bfloat16: 8, torch.float32: 4}  # per thread: one 16-byte access
-_DTYPE = {torch.bfloat16: T.bfloat16, torch.float32: T.float32}
+_VEC = 8  # BF16 per thread: one 16-byte access
 
 
 @tilelang.jit(pass_configs={tilelang.PassConfigKey.TL_DISABLE_WARP_SPECIALIZED: True})
-def rank_order_sum_kernel(
-    world: int, dtype: T.dtype = T.bfloat16, vec: int = 8, threads: int = 256
-):
-    """``out = round(((s0 + s1) + s2) + s3)`` in FP32, element by element, for BF16
-    or FP32 sources (FP32 rounds nothing) in groups of ``vec`` (16 bytes); the
+def rank_order_sum_kernel(world: int, threads: int = 256):
+    """``out = bf16(((s0 + s1) + s2) + s3)`` in FP32, element by element; the
     first source is taken as is (not added to zero), so signed zeros survive."""
     assert 2 <= world <= 4
-    m = T.dynamic("m")  # groups of vec elements
+    m = T.dynamic("m")  # groups of _VEC elements
 
     @T.macro
     def load(src, xs, total, row, first):
-        for i in T.vectorized(vec):
+        for i in T.vectorized(_VEC):
             xs[i] = src[row, i]
-        for i in T.unroll(vec):
+        for i in T.unroll(_VEC):
             if first:
                 total[i] = T.cast(xs[i], T.float32)
             else:
@@ -52,23 +46,23 @@ def rank_order_sum_kernel(
 
     @T.macro
     def store(out, xs, total, row):
-        for i in T.unroll(vec):
-            xs[i] = T.cast(total[i], dtype)
-        for i in T.vectorized(vec):
+        for i in T.unroll(_VEC):
+            xs[i] = T.cast(total[i], T.bfloat16)
+        for i in T.vectorized(_VEC):
             out[row, i] = xs[i]
 
     if world == 2:
 
         @T.prim_func
         def rank_order_sum(
-            s0: T.Tensor((m, vec), dtype),
-            s1: T.Tensor((m, vec), dtype),
-            out: T.Tensor((m, vec), dtype),
+            s0: T.Tensor((m, _VEC), T.bfloat16),
+            s1: T.Tensor((m, _VEC), T.bfloat16),
+            out: T.Tensor((m, _VEC), T.bfloat16),
         ):
             with T.Kernel(T.ceildiv(m, threads), threads=threads) as bx:
                 row = bx * threads + T.get_thread_binding()
-                xs = T.alloc_local((vec,), dtype)
-                total = T.alloc_local((vec,), T.float32)
+                xs = T.alloc_local((_VEC,), T.bfloat16)
+                total = T.alloc_local((_VEC,), T.float32)
                 if row < m:
                     load(s0, xs, total, row, True)
                     load(s1, xs, total, row, False)
@@ -78,15 +72,15 @@ def rank_order_sum_kernel(
 
         @T.prim_func
         def rank_order_sum(
-            s0: T.Tensor((m, vec), dtype),
-            s1: T.Tensor((m, vec), dtype),
-            s2: T.Tensor((m, vec), dtype),
-            out: T.Tensor((m, vec), dtype),
+            s0: T.Tensor((m, _VEC), T.bfloat16),
+            s1: T.Tensor((m, _VEC), T.bfloat16),
+            s2: T.Tensor((m, _VEC), T.bfloat16),
+            out: T.Tensor((m, _VEC), T.bfloat16),
         ):
             with T.Kernel(T.ceildiv(m, threads), threads=threads) as bx:
                 row = bx * threads + T.get_thread_binding()
-                xs = T.alloc_local((vec,), dtype)
-                total = T.alloc_local((vec,), T.float32)
+                xs = T.alloc_local((_VEC,), T.bfloat16)
+                total = T.alloc_local((_VEC,), T.float32)
                 if row < m:
                     load(s0, xs, total, row, True)
                     load(s1, xs, total, row, False)
@@ -97,16 +91,16 @@ def rank_order_sum_kernel(
 
         @T.prim_func
         def rank_order_sum(
-            s0: T.Tensor((m, vec), dtype),
-            s1: T.Tensor((m, vec), dtype),
-            s2: T.Tensor((m, vec), dtype),
-            s3: T.Tensor((m, vec), dtype),
-            out: T.Tensor((m, vec), dtype),
+            s0: T.Tensor((m, _VEC), T.bfloat16),
+            s1: T.Tensor((m, _VEC), T.bfloat16),
+            s2: T.Tensor((m, _VEC), T.bfloat16),
+            s3: T.Tensor((m, _VEC), T.bfloat16),
+            out: T.Tensor((m, _VEC), T.bfloat16),
         ):
             with T.Kernel(T.ceildiv(m, threads), threads=threads) as bx:
                 row = bx * threads + T.get_thread_binding()
-                xs = T.alloc_local((vec,), dtype)
-                total = T.alloc_local((vec,), T.float32)
+                xs = T.alloc_local((_VEC,), T.bfloat16)
+                total = T.alloc_local((_VEC,), T.float32)
                 if row < m:
                     load(s0, xs, total, row, True)
                     load(s1, xs, total, row, False)
@@ -120,25 +114,23 @@ def rank_order_sum_kernel(
 def rank_order_sum(
     parts: list[torch.Tensor], out: torch.Tensor | None = None
 ) -> torch.Tensor:
-    """Equal-shape tensors added in FP32 in list order and rounded once: BF16 or
-    FP32 CUDA tensors whose element count fills 16-byte groups go through the
-    TileLang kernel, anything else through the same arithmetic in torch."""
+    """Equal-shape tensors added in FP32 in list order and rounded once: BF16 CUDA
+    tensors whose element count is a multiple of 8 go through the TileLang kernel,
+    anything else through the same arithmetic in torch."""
     if out is None:
         out = torch.empty_like(parts[0])
-    n, dtype = parts[0].numel(), parts[0].dtype
-    vec = _VEC.get(dtype)
+    n = parts[0].numel()
     if (
         parts[0].is_cuda
-        and vec is not None
-        and out.dtype == dtype
+        and parts[0].dtype == torch.bfloat16
         and 2 <= len(parts) <= 4
-        and n % vec == 0
+        and n % _VEC == 0
         and all(p.is_contiguous() for p in parts)
         and out.is_contiguous()
     ):
         if n:
-            rank_order_sum_kernel(len(parts), _DTYPE[dtype], vec)(
-                *(p.view(-1, vec) for p in parts), out.view(-1, vec)
+            rank_order_sum_kernel(len(parts))(
+                *(p.view(-1, _VEC) for p in parts), out.view(-1, _VEC)
             )
         return out
     total = parts[0].to(torch.float32, copy=True)  # never add into an input
@@ -204,9 +196,7 @@ class RankOrderParts:
     """This rank's rows of a sum over ranks, not yet added: ``packed[r]`` is rank
     ``r``'s partial, ``(world, L, ...)`` contiguous. A consumer that reads every
     part can add them itself (TileLang mHC's ``post_pre``); ``sum()`` gives the
-    rank-order reduce-scatter's result, the same bits, in BF16: FP32 parts (the
-    MoE's unrounded partials) are added in FP32 and rounded once, as the layer
-    rounds its reduced output."""
+    rank-order reduce-scatter's result, the same bits."""
 
     packed: torch.Tensor
 
@@ -219,11 +209,7 @@ class RankOrderParts:
         return self.packed.shape[1:]
 
     def sum(self, out: torch.Tensor | None = None) -> torch.Tensor:
-        parts = list(self.packed.unbind(0))
-        if self.packed.dtype == torch.bfloat16:
-            return rank_order_sum(parts, out)
-        total = rank_order_sum(parts).to(torch.bfloat16)
-        return total if out is None else out.copy_(total)
+        return rank_order_sum(list(self.packed.unbind(0)), out)
 
 
 def reduce_scatter_rank_order(

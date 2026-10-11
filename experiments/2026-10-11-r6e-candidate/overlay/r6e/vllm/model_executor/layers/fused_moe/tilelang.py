@@ -147,8 +147,8 @@ class TileLangExperts(mk.FusedMoEExpertsModular):
 
     @property
     def output_dtype(self) -> torch.dtype:
-        """FP32 under the MoE FP32 partials switch: the runner then adds the shared
-        expert and reduces across ranks in FP32, and the layer rounds once."""
+        """FP32 under the MoE FP32 combine switch: the runner adds the shared
+        expert in FP32 and rounds the rank's partial once before the reduction."""
         return _output_dtype()
 
     # -- weights ----------------------------------------------------------

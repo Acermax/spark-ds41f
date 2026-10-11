@@ -76,13 +76,13 @@
         "ro"
       ],
       [
-        "{home}/projects/spark-ds41f/experiments/2026-10-11-r6e-candidate/overlay/r6e/vllm/models/deepseek_v4/nvidia/model.py",
-        "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4/nvidia/model.py",
+        "{home}/projects/spark-ds41f/experiments/2026-10-11-r6e-candidate/overlay/r6e/vllm/models/deepseek_v4_1/attention.py",
+        "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/attention.py",
         "ro"
       ],
       [
-        "{home}/projects/spark-ds41f/experiments/2026-10-11-r6e-candidate/overlay/r6e/vllm/models/deepseek_v4_1/attention.py",
-        "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/attention.py",
+        "{home}/projects/spark-ds41f/experiments/2026-10-11-r6e-candidate/overlay/r6e/vllm/models/deepseek_v4_1/compressor.py",
+        "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/compressor.py",
         "ro"
       ],
       [
@@ -101,6 +101,11 @@
         "ro"
       ],
       [
+        "{home}/projects/spark-ds41f/experiments/2026-10-11-r6e-candidate/overlay/r6e/vllm/models/deepseek_v4_1/sparse_mla.py",
+        "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/sparse_mla.py",
+        "ro"
+      ],
+      [
         "{home}/projects/spark-ds41f/experiments/2026-10-11-r6e-candidate/overlay/r6e/vllm/models/deepseek_v4_1/tilelang/activation.py",
         "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/activation.py",
         "ro"
@@ -116,8 +121,13 @@
         "ro"
       ],
       [
-        "{home}/projects/spark-ds41f/experiments/2026-10-11-r6e-candidate/overlay/r6e/vllm/models/deepseek_v4_1/tilelang/gemm.py",
-        "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/gemm.py",
+        "{home}/projects/spark-ds41f/experiments/2026-10-11-r6e-candidate/overlay/r6e/vllm/models/deepseek_v4_1/tilelang/compress.py",
+        "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/compress.py",
+        "ro"
+      ],
+      [
+        "{home}/projects/spark-ds41f/experiments/2026-10-11-r6e-candidate/overlay/r6e/vllm/models/deepseek_v4_1/tilelang/metadata.py",
+        "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/metadata.py",
         "ro"
       ],
       [
@@ -133,11 +143,6 @@
       [
         "{home}/projects/spark-ds41f/experiments/2026-10-11-r6e-candidate/overlay/r6e/vllm/models/deepseek_v4_1/tilelang/vocab.py",
         "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/vocab.py",
-        "ro"
-      ],
-      [
-        "{home}/projects/spark-ds41f/experiments/2026-10-11-r6e-candidate/overlay/r6e/vllm/models/deepseek_v4_1/tilelang/wo.py",
-        "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/wo.py",
         "ro"
       ]
     ]

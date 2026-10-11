@@ -15,10 +15,11 @@
     "-rfE",
     "tests/kernels/moe/test_deepseek_v41_tilelang_moe.py",
     "tests/kernels/quantization/test_deepseek_v41_tilelang_vocab.py",
-    "tests/kernels/quantization/test_deepseek_v41_tilelang_wo.py",
     "tests/kernels/test_deepseek_v41_tilelang_activation.py",
     "tests/kernels/test_deepseek_v41_tilelang_cache_writer.py",
     "tests/kernels/test_deepseek_v41_tilelang_collectives.py",
+    "tests/kernels/test_deepseek_v41_tilelang_compress.py",
+    "tests/kernels/test_deepseek_v41_tilelang_metadata.py",
     "tests/kernels/test_deepseek_v41_tilelang_mhc.py",
     "tests/models/test_deepseek_v41_sp_project_reduce_scatter.py"
   ],
@@ -49,12 +50,12 @@
       "/opt/spark3/candidate/vllm/vllm/model_executor/layers/quantization/online/packed_bf16.py"
     ],
     [
-      "vllm__models__deepseek_v4__nvidia__model.py",
-      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4/nvidia/model.py"
-    ],
-    [
       "vllm__models__deepseek_v4_1__attention.py",
       "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/attention.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__compressor.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/compressor.py"
     ],
     [
       "vllm__models__deepseek_v4_1__kernels.py",
@@ -69,6 +70,10 @@
       "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/sp_prefill.py"
     ],
     [
+      "vllm__models__deepseek_v4_1__sparse_mla.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/sparse_mla.py"
+    ],
+    [
       "vllm__models__deepseek_v4_1__tilelang__activation.py",
       "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/activation.py"
     ],
@@ -81,8 +86,12 @@
       "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/collectives.py"
     ],
     [
-      "vllm__models__deepseek_v4_1__tilelang__gemm.py",
-      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/gemm.py"
+      "vllm__models__deepseek_v4_1__tilelang__compress.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/compress.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__tilelang__metadata.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/metadata.py"
     ],
     [
       "vllm__models__deepseek_v4_1__tilelang__mhc.py",
@@ -97,20 +106,12 @@
       "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/vocab.py"
     ],
     [
-      "vllm__models__deepseek_v4_1__tilelang__wo.py",
-      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/wo.py"
-    ],
-    [
       "tests__kernels__moe__test_deepseek_v41_tilelang_moe.py",
       "/opt/spark3/candidate/vllm/tests/kernels/moe/test_deepseek_v41_tilelang_moe.py"
     ],
     [
       "tests__kernels__quantization__test_deepseek_v41_tilelang_vocab.py",
       "/opt/spark3/candidate/vllm/tests/kernels/quantization/test_deepseek_v41_tilelang_vocab.py"
-    ],
-    [
-      "tests__kernels__quantization__test_deepseek_v41_tilelang_wo.py",
-      "/opt/spark3/candidate/vllm/tests/kernels/quantization/test_deepseek_v41_tilelang_wo.py"
     ],
     [
       "tests__kernels__test_deepseek_v41_tilelang_activation.py",
@@ -123,6 +124,14 @@
     [
       "tests__kernels__test_deepseek_v41_tilelang_collectives.py",
       "/opt/spark3/candidate/vllm/tests/kernels/test_deepseek_v41_tilelang_collectives.py"
+    ],
+    [
+      "tests__kernels__test_deepseek_v41_tilelang_compress.py",
+      "/opt/spark3/candidate/vllm/tests/kernels/test_deepseek_v41_tilelang_compress.py"
+    ],
+    [
+      "tests__kernels__test_deepseek_v41_tilelang_metadata.py",
+      "/opt/spark3/candidate/vllm/tests/kernels/test_deepseek_v41_tilelang_metadata.py"
     ],
     [
       "tests__kernels__test_deepseek_v41_tilelang_mhc.py",
