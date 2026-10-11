@@ -91,3 +91,18 @@ r6e / r6e-fixed (adaptive verification off) / r6e bracket:
 
 Adaptive verification stays on. The remaining difference is reproducible and has
 another cause. The [bisect](../2026-10-11-r6e-bisect/README.md) finds the piece.
+
+## Promotion bench ([w4.json](w4.json))
+
+r6e is level with or ahead of r6d on every metric of the lean screens. It cuts the
+mixed15 difference from 13/16 requests to 1/1 and computes closer to the reference.
+The owner's acceptance is one bench at the recipe limits, the r6d gate's:
+- quality;
+- decode on prose and code at 1-16 streams;
+- prefill on source text at 32K, 256K, 500K and 1M tokens;
+- compared with r6d's reference (`manifests/benchmarks/2026-10-10-karmic-kraken-r6d-tp4.json`);
+- with `token_determinism.py --wide` and the acceptance sweep.
+
+The arm is the overlay over the r6d image; promotion bakes the same sources into an
+image. The bisect's fix, if it changes a kernel's arithmetic only, leaves these
+numbers standing.

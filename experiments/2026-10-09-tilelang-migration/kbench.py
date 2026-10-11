@@ -7,6 +7,12 @@ of a comparison pay the same graph launch.
 Repeatability: a port must give the same bits on every run (temperature-0 serving
 replays the same graphs), so each bench replays its kernels' graphs, warm and cold,
 against an eager call.
+
+Buckets: a port may run its own schedule per row bucket (decode, mid, prefill: tiles,
+split over CTAs, fusion), so a decode win need not cost prefill. A row's arithmetic may
+not change with the bucket (shard count, reduction order, rounding points): every size
+must give its rows' bits of the full batch (``batch_variance``), and the floor is judged
+per bucket (``bucket_lines``), so a win in one bucket cannot hide a loss in another.
 """
 import statistics
 import sys
@@ -25,6 +31,7 @@ PREFILL = (512, 2048, CAPACITY)
 REPEAT = (1, 6, 16, 48, 96, 128, 512, CAPACITY)  # sizes whose graphs are replayed for repeatability
 REPLAYS = 200
 SLOWER = 1.03  # a port may be at most 3% slower per call, warm or cold
+BUCKETS = (("decode", 1, DECODE[-1]), ("mid", DECODE[-1] + 1, PREFILL[1] - 1), ("prefill", PREFILL[1], CAPACITY))
 _EVICT = torch.ones(128 << 20, dtype=torch.uint8, device=DEVICE).view(torch.int32)
 
 
@@ -84,6 +91,37 @@ def timing_line(rows: int, base: tuple[float, float], port: tuple[float, float])
 
 def slower(base: tuple[float, float], port: tuple[float, float]) -> bool:
     return port[0] > base[0] * SLOWER or port[1] > base[1] * SLOWER
+
+
+def batch_variance(call: Callable[[int], torch.Tensor], sizes=DECODE + PREFILL[:-1],
+                   full_rows: int = CAPACITY) -> list[int]:
+    """Row counts whose rows differ in any bit from the same rows of the full batch.
+
+    ``call(rows)`` runs the kernel on the first ``rows`` rows of fixed inputs (copying
+    them fresh first if the kernel writes its inputs) and returns its output for those
+    rows. Each size takes its own bucket's schedule, so this checks every bucket against
+    the prefill one."""
+    full = call(full_rows).clone()
+    return [rows for rows in sizes if not torch.equal(call(rows), full[:rows])]
+
+
+def bucket_lines(times: dict[int, tuple[tuple[float, float], tuple[float, float]]]) -> tuple[list[str], list[str]]:
+    """Per bucket, from ``times[rows] = (base, port)`` (warm, cold microseconds): the
+    port's best and worst ratio to the base, warm and cold, and the sizes past the
+    ``SLOWER`` budget. Returns the report lines and the failing buckets."""
+    lines, failing = [], []
+    for name, low, high in BUCKETS:
+        rows = sorted(r for r in times if low <= r <= high)
+        if not rows:
+            continue
+        warm = [times[r][1][0] / times[r][0][0] for r in rows]
+        cold = [times[r][1][1] / times[r][0][1] for r in rows]
+        over = [r for r in rows if slower(*times[r])]
+        lines.append(f"  {name:7s} rows {rows[0]}-{rows[-1]}: ratio warm {min(warm):.3f}-{max(warm):.3f}, "
+                     f"cold {min(cold):.3f}-{max(cold):.3f}, " + (f"slower at {over}" if over else "at the floor"))
+        if over:
+            failing.append(name)
+    return lines, failing
 
 
 def repeatable(fn, outputs: Callable[[], list[torch.Tensor]], replays: int = REPLAYS) -> int:
