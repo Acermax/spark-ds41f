@@ -121,3 +121,32 @@ The kernel bundles first: the MoE tests on dgx1, the WO tests on dgx2. Then the 
 screen with determinism, distinct prompts, mixed traffic and the acceptance sweep. The
 promotion bench ([w4.json](w4.json)) follows, on r6e or on r6e with the pieces that
 pass.
+
+### Pieces window 1 results (2026-10-11, 15:30-16:01 UTC)
+
+r6e / fold / wobf16 / r6e bracket:
+
+| metric | r6e | fold | wobf16 | r6e bracket |
+|---|---|---|---|---|
+| prose c1 tok/s (acceptance) | 62.79 (1.056) | 62.85 (1.056) | 70.32 (1.339) | 62.75 |
+| JSON c1 tok/s | 102.64 | 102.21 | 99.81 (acceptance 3.000) | 102.46 |
+| distinct prompts | 89.42 | 89.19 | 88.99 | 89.37 |
+| cold prefill 1K / 16K | 2547 / 5616 | 2639 / 5707 | 2616 / 5598 | 2634 / 5653 |
+| eight prompts | 175.91 | 175.46 | 178.59 | 175.83 |
+| mixed long TTFT (ms) | 923 | 912 | 923 | 925 |
+| mixed15 differing | 1/1 | 1/1 | **9/9** | 1/1 |
+| references | r6e | r6e's, bit for bit | changed | r6e's |
+
+- **fold:** passes.
+  - Its references and every determinism scenario equal r6e's.
+  - 16K prefill is about +1.3% against both r6e arms. 1K is level with the bracket;
+    the first r6e arm's 1K read low.
+  - Everything else is level.
+- **wobf16:** fails determinism (9 of 16 mixed15 requests). Its sequence-parallel
+  steps used a plain reduce-scatter; see [wo-bf16](../2026-10-11-wo-bf16/README.md).
+  The paired acceptance sweep is level (+0.9% ±2.4%).
+
+## Promotion bench on r6e + fold ([w6.json](w6.json))
+
+[w4.json](w4.json)'s bench on the r6e-fold arm: the candidate is r6e with the MoE fold,
+which keeps r6e's bits.
