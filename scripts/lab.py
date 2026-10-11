@@ -1066,7 +1066,11 @@ def verdicts_agree(verdicts: list[dict]) -> bool:
     return all(len(keys) == 1 for keys in by_bundle.values())
 
 
-def execute(spec: dict, dry: bool, keep_open: bool) -> int:
+def execute(spec: dict, dry: bool, keep_open: bool, close_on_failure: bool = True) -> int:
+    """Run a spec's steps in the window (opening one unless held). The window closes when
+    the run ends (unless ``keep_open``), when the window itself must end (hold lost, time
+    cap, a cluster request), and when a step fails unless ``close_on_failure`` is false
+    (the queue: a failed job is recorded and the next one runs)."""
     steps = plan(spec)
     if dry:
         print(f"run {spec['run']}: {len(steps)} steps; production {PRODUCTION_CONFIG}")
@@ -1079,6 +1083,7 @@ def execute(spec: dict, dry: bool, keep_open: bool) -> int:
     home = production_configuration()[0]["host"]["home"]
     checked = set()
     failed = None
+    window_ending = None  # a reason the window itself must close, not just this run
     current = {"note": "starting"}
     stop_beating = threading.Event()
 
@@ -1095,11 +1100,11 @@ def execute(spec: dict, dry: bool, keep_open: bool) -> int:
     for step in steps:
         hold = read_hold()
         if not hold_is_ours(hold):
-            failed = "hold file lost"
+            failed = window_ending = "hold file lost"
             break
         reason = window_should_close(hold)
         if reason:
-            failed = reason
+            failed = window_ending = reason
             break
         current["note"] = describe_step(step)
         beat(current["note"])
@@ -1176,7 +1181,7 @@ def execute(spec: dict, dry: bool, keep_open: bool) -> int:
     stop_beating.set()
     if failed:
         log(f"run stopped: {failed}")
-    if failed or not keep_open:
+    if window_ending or not keep_open or (failed and close_on_failure):
         window_close(failed or "run complete")
     log("done")
     return 1 if failed else 0
@@ -1238,12 +1243,17 @@ def queue_run(idle_minutes: int, minutes: int) -> int:
         running = QUEUE / "running" / job.name
         os.replace(job, running)
         log(f"QUEUE job {job.name} started")
-        code = execute(json.loads(running.read_text()), dry=False, keep_open=True)
+        code = execute(json.loads(running.read_text()), dry=False, keep_open=True,
+                       close_on_failure=False)
         os.replace(running, QUEUE / ("done" if code == 0 else "failed") / job.name)
         log(f"QUEUE job {job.name} {'done' if code == 0 else 'failed'}")
-        if code:
-            log("QUEUE closed (job failed; the window was closed by the run)")
+        if code and not hold_is_ours(read_hold()):
+            log("QUEUE closed (the window was closed by the run)")
             return code
+        if code:
+            # A failed job (a boot that never came up, a step that raised) costs only
+            # itself: the next spec stops and boots what it needs.
+            log("QUEUE continuing after the failed job")
         if hashlib.sha256(me.read_bytes()).hexdigest() != code_at_start:
             # A sync job brought new runner code: continue the same window on it.
             log("QUEUE restarting on the synced runner (window stays open)")

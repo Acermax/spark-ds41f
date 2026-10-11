@@ -395,6 +395,71 @@ class QueueTest(unittest.TestCase):
         self.assertEqual([s["kind"] for s in steps], ["sync"])
 
 
+class QueueFailureTest(unittest.TestCase):
+    """A failed job costs only itself in the queue; the window still ends on its own reasons."""
+
+    def _execute(self, close_on_failure: bool, should_close=None):
+        closed = []
+        spec = {"run": "r", "experiment": "experiments/x", "jobs": []}
+        step = {"kind": "kernel", "bundles": [], "out": "results/private/lab/r"}
+        with mock.patch.object(lab, "plan", return_value=[step]), \
+                mock.patch.object(lab, "read_hold", return_value={"holder": "spark-lab: queue"}), \
+                mock.patch.object(lab, "hold_is_ours", return_value=True), \
+                mock.patch.object(lab, "window_should_close", return_value=should_close), \
+                mock.patch.object(lab, "production_configuration",
+                                  return_value=({"host": {"home": "/h"}}, [], None)), \
+                mock.patch.object(lab, "beat"), mock.patch.object(lab, "log"), \
+                mock.patch.object(lab, "run_kernel_bundles", side_effect=RuntimeError("boom")), \
+                mock.patch.object(lab, "window_close", side_effect=lambda reason, dry=False: closed.append(reason)):
+            code = lab.execute(spec, dry=False, keep_open=True, close_on_failure=close_on_failure)
+        return code, closed
+
+    def test_queue_job_failure_keeps_the_window(self) -> None:
+        code, closed = self._execute(close_on_failure=False)
+        self.assertEqual(code, 1)
+        self.assertEqual(closed, [])
+
+    def test_run_failure_still_closes_the_window(self) -> None:
+        code, closed = self._execute(close_on_failure=True)
+        self.assertEqual(code, 1)
+        self.assertEqual(len(closed), 1)
+        self.assertIn("raised RuntimeError", closed[0])
+
+    def test_window_reasons_close_even_in_the_queue(self) -> None:
+        code, closed = self._execute(close_on_failure=False, should_close="cluster requested (x)")
+        self.assertEqual(code, 1)
+        self.assertEqual(closed, ["cluster requested (x)"])
+
+    def test_queue_runs_the_next_spec_after_a_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            queue = Path(directory) / "queue"
+            queue.mkdir()
+            for name in ("20260101T000000-a.json", "20260101T000001-b.json"):
+                (queue / name).write_text(json.dumps({"run": name, "jobs": []}))
+            ran, closed = [], []
+
+            def execute(spec, dry, keep_open, close_on_failure=True):
+                ran.append((spec["run"], close_on_failure))
+                return 1 if len(ran) == 1 else 0
+
+            idle = iter([None, None, None, "time cap reached"])
+            with mock.patch.object(lab, "QUEUE", queue), \
+                    mock.patch.object(lab, "window_open"), \
+                    mock.patch.object(lab, "read_hold", return_value={"holder": "spark-lab: queue"}), \
+                    mock.patch.object(lab, "hold_is_ours", return_value=True), \
+                    mock.patch.object(lab, "window_should_close", side_effect=lambda hold: next(idle)), \
+                    mock.patch.object(lab, "execute", side_effect=execute), \
+                    mock.patch.object(lab, "beat"), mock.patch.object(lab, "log"), \
+                    mock.patch.object(lab.time, "sleep"), \
+                    mock.patch.object(lab, "window_close", side_effect=lambda reason, dry=False: closed.append(reason)):
+                code = lab.queue_run(idle_minutes=5, minutes=60)
+            self.assertEqual(code, 0)
+            self.assertEqual(ran, [("20260101T000000-a.json", False), ("20260101T000001-b.json", False)])
+            self.assertEqual([p.name for p in (queue / "failed").iterdir()], ["20260101T000000-a.json"])
+            self.assertEqual([p.name for p in (queue / "done").iterdir()], ["20260101T000001-b.json"])
+            self.assertEqual(closed, ["time cap reached"])
+
+
 class CustomWorkloadTest(unittest.TestCase):
     def test_job_workloads_may_name_a_repository_script(self) -> None:
         job = {"kind": "measure", "arms": [{"config": "cluster-a.json", "label": "a"}],
