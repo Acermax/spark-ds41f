@@ -1,0 +1,34 @@
+{
+  "experiment": "experiments/2026-10-12-r6g",
+  "run": "r6g-debug-w4",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "measure",
+      "bench": false,
+      "bracket": false,
+      "extras": [
+        [
+          "scripts/distinct_streams.py",
+          [
+            "--streams",
+            "16",
+            "--samples",
+            "1",
+            "--tokens",
+            "64"
+          ],
+          "c16-distinct"
+        ]
+      ],
+      "arms": [
+        {
+          "config": "w4-debug.json",
+          "label": "debug"
+        }
+      ]
+    }
+  ]
+}
