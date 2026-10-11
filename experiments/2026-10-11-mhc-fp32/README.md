@@ -24,3 +24,26 @@ change in their low bits); the arm must be identical to itself in every scenario
 
 Acceptance: temperature-0 identical within the arm; decode, prefill and mixed traffic
 level with r6d (the extra GEMMs are small next to the streams' traffic).
+
+## Status
+
+Window 1 (2026-10-11, 07:55-08:15 UTC, r6d / mhcfp32 / r6d): the mHC tests pass in the
+image, including the FP32 bound against FP64.
+
+| Measure | r6d | mhcfp32 | r6d (end) |
+| --- | --- | --- | --- |
+| prose c1 step | 31.48 ms | 31.85 ms (+1.2%) | 31.58 ms (+0.3%) |
+| json c1 step | 36.67 ms | 36.48 ms (-0.5%) | 36.72 ms (+0.1%) |
+| single stream, distinct prompts | 87.43 tok/s | +2.4% | -0.3% |
+| eight distinct concurrent prompts | 175.76 tok/s | -1.8% | -0.1% |
+| cold prefill 1K / 16K | 2652 / 5613 tok/s | -0.5% / -0.8% | +0.4% / -0.3% |
+| mixed: short / long TTFT | 229.4 / 902.2 ms | -1.7% / -1.5% | -2.4% / +0.1% |
+| temperature 0 | identical | identical | identical |
+| references against r6d | - | different | same bits |
+
+The arm is identical to itself in every scenario; its references differ from r6d's, as
+the mixes now carry FP32 precision. Tokens per second move with the generated text
+(prose: accepted per draft 1.525 against 1.257), so step time is the comparison: about
++1% on prose, -0.6% on JSON, -1.8% at eight distinct streams and 0.5-0.8% on prefill
+against the mean of the two r6d runs. A cost under 2%, far above the B12X floor; an FP32
+FMA variant of the 24-column projection (no tensor cores) is the follow-up to recover it.
