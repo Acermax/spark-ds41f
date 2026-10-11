@@ -25,6 +25,29 @@ above r6d's at 96 verify rows. Two fixes keep every bit:
 
 The overlay mounts the four changed files over the r6f image.
 
+### Window 1 results (2026-10-11, 22:41-23:06 UTC)
+
+| metric | r6f | fold | r6f again |
+|---|---|---|---|
+| determinism `--wide` | identical | identical | identical |
+| references | `7ae87256d3ea` / `b8b35451dcc4` | the same | the same |
+| sixteen different prompts at once, tok/s | 222.4 ±0.4% | **225.2** ±0.8% | 221.8 ±1.0% |
+| eight different prompts at once | 177.6 ±1.0% | 178.7 ±1.3% | 177.7 ±1.6% |
+| verify cost, 24-96 rows (real rows) | | -2.3% | |
+
+The fold keeps r6f's bits and is 1.4% faster at sixteen prompts (against the two r6f
+arms' mean); eight is level. The fixed-row profile shows the separate add-and-round
+pass gone (281 µs a step to 0) and the sparknet all-reduce 12 µs a call faster. Under
+the torch profiler the routed experts' grouped GEMMs ran 15-22% longer a call with the
+fold and the profiled window was slower, which the unprofiled cost curves and
+throughput do not show: the shared expert now starts on the aux stream after the gate
+and shares SMs with the routed GEMMs. Open: whether a later aux launch (after the
+gate/up GEMM) gains more.
+
+The r6f arms read 222.4 and 221.8 at sixteen prompts against 218.0 in the release
+session of 2026-10-11: sessions differ by about 2%, so the verdict against r6d comes
+from one session with both.
+
 ## Window 2 ([w2.json](w2.json)): both fixes
 
 r6f / r6g / r6f again. r6g mounts vLLM `r6g-fold-overlap` `bbd7157f0` over the r6f
