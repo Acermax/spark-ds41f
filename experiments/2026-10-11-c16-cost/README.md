@@ -42,3 +42,10 @@ same padded step, or something now contends with these GEMMs.
 
 Code c16 alone (3 samples) on r6d, r6e's prefixes p1-p4 with adaptive verification on
 (the bisect arms had it off), and r6f. The first prefix that loses c16 names the piece.
+
+## Window 4 ([w4.json](w4.json))
+
+The bench's c16 point is one prompt on sixteen streams, so a precision change that
+moves the text moves the workload: acceptance at code c16 goes 1.28 (r6d, p1), 1.41
+(p2), 1.64 (p3). r6d / r6f / r6d bracket on sixteen and eight distinct concurrent
+prompts (four samples) separate a throughput loss from the text.

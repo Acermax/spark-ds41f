@@ -1,0 +1,50 @@
+{
+  "experiment": "experiments/2026-10-11-c16-cost",
+  "run": "c16-distinct-w4",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "measure",
+      "bench": false,
+      "bracket": true,
+      "extras": [
+        [
+          "scripts/distinct_streams.py",
+          [
+            "--streams",
+            "16",
+            "--samples",
+            "4",
+            "--tokens",
+            "256"
+          ],
+          "c16-distinct"
+        ],
+        [
+          "scripts/distinct_streams.py",
+          [
+            "--streams",
+            "8",
+            "--samples",
+            "4",
+            "--tokens",
+            "256"
+          ],
+          "c8-distinct"
+        ]
+      ],
+      "arms": [
+        {
+          "config": "experiments/2026-10-10-r6d-deterministic/r6d-tp4.json",
+          "label": "r6d"
+        },
+        {
+          "config": "experiments/2026-10-11-attn-split/r6f-split.json",
+          "label": "r6f"
+        }
+      ]
+    }
+  ]
+}
