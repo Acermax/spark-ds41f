@@ -1,0 +1,53 @@
+{
+  "experiment": "experiments/2026-10-11-r6e-bisect",
+  "run": "r6e-bisect-w1",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "measure",
+      "profile": "lean",
+      "bench": false,
+      "extras": [
+        [
+          "experiments/2026-10-09-tilelang-migration/token_determinism.py",
+          [
+            "--tokens",
+            "192",
+            "--long-lines",
+            "700",
+            "--wide"
+          ],
+          "determinism"
+        ]
+      ],
+      "arms": [
+        {
+          "config": "p1-allreduce.json",
+          "label": "p1-allreduce"
+        },
+        {
+          "config": "p2-moe.json",
+          "label": "p2-moe"
+        },
+        {
+          "config": "p3-head.json",
+          "label": "p3-head"
+        },
+        {
+          "config": "p4-precision.json",
+          "label": "p4-precision"
+        },
+        {
+          "config": "p5-b3.json",
+          "label": "p5-b3"
+        },
+        {
+          "config": "p6-b4.json",
+          "label": "p6-b4"
+        }
+      ]
+    }
+  ]
+}
