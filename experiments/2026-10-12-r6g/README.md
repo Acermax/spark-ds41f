@@ -24,3 +24,21 @@ above r6d's at 96 verify rows. Two fixes keep every bit:
   bench's code prompt on sixteen streams under the torch profiler.
 
 The overlay mounts the four changed files over the r6f image.
+
+## Window 2 ([w2.json](w2.json)): both fixes
+
+r6f / r6g / r6f again. r6g mounts vLLM `r6g-fold-overlap` `bbd7157f0` over the r6f
+image: the window 1 fold and greedy verification from vocabulary shards (an
+all-greedy step whose logits nothing reads reduces each rank's shard to a
+`(max, index)` pair, gathers the pairs and applies `rejection_sample`'s greedy rule;
+`VLLM_GREEDY_VERIFICATION=0` keeps the gathered path).
+
+- Kernel bundle first ([bundles/r6g](bundles/r6g)): the deferred shared addend against
+  the direct one, and the shard argmax against `torch.argmax` (ties across shard
+  boundaries, junk in the padding) and the greedy rule against `rejection_sample`.
+- [token_determinism_text.py](token_determinism_text.py) twice per arm: with logprobs
+  (the gathered path; r6g's references must be r6f's), and `--no-logprobs` (r6g's
+  greedy path: every scenario identical, and the reference texts' digest equal to the
+  logprobs run's).
+- Sixteen and eight different prompts at once (no logprobs: the greedy path) and
+  real-row cost curves.
