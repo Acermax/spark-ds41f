@@ -14,6 +14,9 @@ temperature 0, a fixed number of tokens, fresh cache salts, served:
   it served alone;
 - cached: each prompt twice with one salt; the second reuses the first's KV and
   computes only its last token;
+- mixed15 (--wide): fifteen prompts at once (the eight and seven more) with the long
+  prompt 0.3 s later, so verifying streams can fill CED decoder steps past 204 rows,
+  where all-reduces leave sparknet's one-shot path; each compared with it alone;
 - again: one at a time once more (run to run, after the traffic above).
 
 Each request asks for the chosen tokens' logprobs. Tokens must match the reference
@@ -44,6 +47,16 @@ PROMPTS = [
     "Summarize the causes and consequences of the printing press in Europe.",
     "Explain the difference between supervised and unsupervised learning to a student.",
     "Plan a three-day hiking trip in the Alps with packing advice.",
+]
+# The wide scenario's seven more prompts (fifteen streams leave a slot for the long one).
+MORE_PROMPTS = [
+    "Write a Python function that merges overlapping intervals, with tests.",
+    "Explain how a CPU cache hierarchy affects the speed of matrix multiplication.",
+    "Describe the water cycle for a ten-year-old, step by step.",
+    "Implement binary search in Rust and explain each edge case.",
+    "Outline a beginner's four-week strength training plan.",
+    "Explain how public-key cryptography lets strangers agree on a secret.",
+    "Write a SQL query for the top three products by revenue per month, and explain it.",
 ]
 
 
@@ -132,6 +145,7 @@ def main() -> None:
     parser.add_argument("base_url")
     parser.add_argument("--tokens", type=int, default=192)
     parser.add_argument("--long-lines", type=int, default=400)
+    parser.add_argument("--wide", action="store_true", help="add the fifteen-stream mixed scenario")
     args = parser.parse_args()
     client = Client(args.base_url.rstrip("/"))
     tokens, long_text = args.tokens, long_prompt(args.long_lines)
@@ -144,6 +158,11 @@ def main() -> None:
     }
     mixed = together(client, [(0.0, p, tokens, None) for p in PROMPTS] + [(0.3, long_text, 64, None)])
     scenarios["mixed"], long_mixed = mixed[:-1], mixed[-1]
+    wide = []
+    if args.wide:
+        more_reference = [client.complete(p, tokens) for p in MORE_PROMPTS]
+        wide = together(client, [(0.0, p, tokens, None) for p in PROMPTS + MORE_PROMPTS]
+                        + [(0.3, long_text, 64, None)])
     cached = []
     for prompt in PROMPTS:
         salt = uuid.uuid4().hex
@@ -162,6 +181,15 @@ def main() -> None:
         identical &= token_diffs == 0 and logprob_diffs == 0
         report[name] = {"token_diffs": token_diffs, "logprob_diffs": logprob_diffs}
         print(json.dumps({"scenario": name, **report[name], "requests": rows}), flush=True)
+    if wide:
+        references = reference + more_reference
+        rows = [dict(compare(r, ref), prompt=i) for i, (r, ref) in enumerate(zip(wide[:-1], references))]
+        rows.append(dict(compare(wide[-1], long_reference), prompt="long"))
+        token_diffs = sum(r.get("first_token_diff") is not None or r.get("first_char_diff") is not None for r in rows)
+        logprob_diffs = sum(r["logprobs_equal"] is False for r in rows)
+        identical &= token_diffs == 0 and logprob_diffs == 0
+        report["mixed15"] = {"token_diffs": token_diffs, "logprob_diffs": logprob_diffs}
+        print(json.dumps({"scenario": "mixed15", **report["mixed15"], "requests": rows}), flush=True)
     print(json.dumps({"summary": "temperature-0 determinism", "identical": identical,
                       "logprobs": client.logprobs, "tokens": tokens, "scenarios": report,
                       "reference_sha256": digest(reference), "long_sha256": digest([long_reference])}),
