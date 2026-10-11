@@ -196,7 +196,7 @@ change in the numbers means a change in the release, not in the method:
   - prefill on source text at 1K, 32K, 128K, 256K, 512K and 1,000,000 tokens, three
     repeats;
   - the sixteen-prompt acceptance sweep;
-  - distinct prompts at 1, 4, 8 and 16 concurrent streams;
+  - twelve prompts in turn at one stream, and different prompts at once at 4, 8 and 16 streams;
   - short-prompt TTFT, mixed traffic, and `token_determinism.py --wide`.
 
   About 35-40 minutes an arm on TP4.

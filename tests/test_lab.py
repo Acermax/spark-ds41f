@@ -784,8 +784,8 @@ class ReleaseProfileTest(unittest.TestCase):
                                 "accepted_per_draft": 1.5}) + "\n" for p in range(16)))
             out = subprocess.run([sys.executable, str(ROOT / "scripts/release_table.py"), "rel", "base", "cand"],
                                  cwd=root, text=True, capture_output=True, check=True).stdout
-        self.assertIn("16 distinct streams tok/s", out)
-        self.assertRegex(out, r"16 distinct streams tok/s.*\+10\.0%.*faster")
+        self.assertIn("16 different prompts at once tok/s", out)
+        self.assertRegex(out, r"16 different prompts at once tok/s.*\+10\.0%.*faster")
         self.assertRegex(out, r"32,768 tokens.*same")
         self.assertRegex(out, r"acceptance sweep tok/s.*paired over 16 prompts.*faster")
         self.assertIn("5/5", out)

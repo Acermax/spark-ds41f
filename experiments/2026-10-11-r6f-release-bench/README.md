@@ -48,7 +48,7 @@ combined 95% intervals.
 | quality | 5/5 | 5/5 | | same |
 | acceptance sweep tok/s (paired, 16 prompts) | | | -0.1% ±2.4% | same |
 | acceptance sweep accepted (paired) | | | +1.2% ±4.8% | same |
-| 1 distinct stream tok/s | 87.2 | 89.2 | +2.2% ±0.4% | faster |
+| 1 stream, one prompt (see note) tok/s | 87.2 | 89.2 | +2.2% ±0.4% | follows the text |
 | 4 distinct streams | 132.1 | 133.1 | +0.7% ±2.4% | same |
 | 8 distinct streams | 175.8 | 175.4 | -0.2% ±1.1% | same |
 | 16 distinct streams | 222.1 | 218.0 | -1.8% ±0.6% | **slower** |
@@ -86,7 +86,7 @@ triangle are the simple test of the complete solution.
 | quality | 5/5 | 5/5 | | same |
 | acceptance sweep tok/s (paired, 16 prompts) | | | -1.9% ±2.1% | same |
 | acceptance sweep accepted (paired) | | | -2.5% ±4.6% | same |
-| 1 distinct stream tok/s | 70.8 | 68.3 | -3.5% ±0.1% | **slower** |
+| 1 stream, one prompt (see note) tok/s | 70.8 | 68.3 | -3.5% ±0.1% | follows the text |
 | 4 distinct streams | 107.3 | 104.0 | -3.1% ±0.2% | **slower** |
 | 8 distinct streams | 136.1 | 135.0 | -0.8% ±1.0% | same |
 | prefill 1K tok/s | 2153 | 2281 | +5.9% ±13.5% | same |
@@ -111,3 +111,8 @@ Reading:
   holds a third of the vocabulary and experts instead of a quarter.
 - The decode gains of the bit-identical pieces measured on TP4 do not cover it here.
 - The mixed-traffic p95 gap (+16.5%) has no interval and wants a repeat.
+
+**Note (protocol fix):** the one-stream row above ran `distinct_streams.py --streams 1`,
+which sends one prompt. Like the bench's points, it follows the text. The one-stream
+measure is the paired sweep: TP4 -0.1% ±2.4%, TP3 -1.9% ±2.1%, level on both. The
+`release` profile now runs twelve prompts in turn at one stream (`c1_distinct.py`).
