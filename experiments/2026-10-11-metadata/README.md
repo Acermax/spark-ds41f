@@ -56,3 +56,14 @@ but cold it lost:
 
 vLLM `f23f050fc` gives each row a block for its window metadata and one for its page
 table, still one launch. Window 3 ([w3.json](w3.json)) is the kernel bundle again.
+
+### Window 3 (2026-10-11, 12:54 UTC, kernel only)
+
+85 tests passed. With two blocks a row:
+- **Decode:** 0.68-0.72x Triton warm and cold.
+- **Builder:** 0.81-0.85x.
+- **Prefill:** 1.22-1.43x. Each block took the page table's width (256 threads), half
+  idle in the window part, across 4096 blocks at 2048 rows.
+
+vLLM `18ac093ba` makes blocks as wide as the window (128 threads), with the page part
+looping. Window 4 ([w4.json](w4.json)) is the kernel bundle again.

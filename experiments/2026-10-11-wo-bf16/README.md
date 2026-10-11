@@ -47,3 +47,23 @@ shared memory once per K tile and multiplies from there: the same products, one 
 barrier per tile. All four tiles compile; the generated loop double-buffers the scale
 tile with the pipeline. Window 2 ([w2.json](w2.json)) is window 1 again on the fixed
 arm, with the acceptance sweep.
+
+### Window 2 (2026-10-11, 11:13 UTC): not repeatable and slower
+
+Tests passed (9). The bench failed on two counts:
+- **Repeatability:** graph replays at 1-48 rows gave other bits. The producer warps'
+  scale stores raced the consumers.
+- **Speed:** the whole WO took 46 against B12X's 30.8 us warm at decode, and was slower
+  up to 2048 rows (0.75x at 8192). The error against FP64 was below B12X's
+  (0.49/0.081 against 0.68/0.114, max/RMS).
+
+The window was closed before the serving arms. The fixes, measured in the
+[sweep](../2026-10-11-wo-bf16-sweep/README.md):
+- vLLM `145a64d10` turns warp specialization off. Every config is repeatable.
+- vLLM `50f6f886d` takes the swept tiles: 32 columns and two stages up to 128 rows, 64
+  columns past them. WO-A alone takes 19.5-20 us at 1-16 rows, 28.7 at 48, 43 at 96,
+  140 at 512, 399 at 2048 and 1504 at 8192.
+
+Window 3 ([w3.json](w3.json), kernel only) reruns the whole-projection bench against
+B12X. At decode WO-A alone is about two thirds of B12X's whole WO, so split-K, with a
+fixed shard count at every row count, is the likely next step.

@@ -17,7 +17,7 @@ REL = HERE.relative_to(ROOT).as_posix()
 BASE = ROOT / "experiments/2026-10-10-r6d-deterministic/r6d-tp4.json"
 KBENCH = ROOT / "experiments/2026-10-09-tilelang-migration/kbench.py"
 R6D = "r6d-candidate"  # the vLLM branch of the r6d image's tree
-ARM = "f23f050fc"  # the metadata switch and the fused decode metadata, two blocks a row
+ARM = "18ac093ba"  # the metadata switch and the fused decode metadata, window-wide blocks
 TREE = "/opt/spark3/candidate/vllm"
 TESTS = ["tests/kernels/test_deepseek_v41_tilelang_metadata.py"]
 
