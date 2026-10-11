@@ -789,3 +789,15 @@ class ReleaseProfileTest(unittest.TestCase):
         self.assertRegex(out, r"32,768 tokens.*same")
         self.assertRegex(out, r"acceptance sweep tok/s.*paired over 16 prompts.*faster")
         self.assertIn("5/5", out)
+
+
+class ReleaseTP3ProfileTest(unittest.TestCase):
+    def test_release_tp3_stays_within_tp3_limits(self) -> None:
+        args = lab.PROFILES["release-tp3"]["bench_args"]
+        self.assertEqual(args[args.index("--concurrency") + 1], "1,2,4,8")
+        sizes = [int(x) for x in args[args.index("--prefill-sizes") + 1].split(",")]
+        self.assertTrue(all(size < 524288 - 64 for size in sizes))
+        stems = [extra[2] for extra in lab.PROFILES["release-tp3"]["extras"]]
+        self.assertNotIn("c16-distinct", stems)
+        self.assertIn("c8-distinct", stems)
+        self.assertEqual(lab.PROFILES["release-tp3"]["table"], "scripts/release_table.py")

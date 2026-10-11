@@ -23,8 +23,16 @@ image's sources), back to back in one session:
 - **latency:** short-prompt TTFT and mixed traffic;
 - **determinism:** `token_determinism.py --wide`.
 
-## TP3
+## TP3 ([tp3.json](tp3.json))
 
-After re-cabling to the triangle: the same plan with `r6d-tp3.json` and
-`r6f-tp3.json` at TP3's limits (8 streams, 512K), and one gate of the complete r6f
-(boot and determinism) first.
+After re-cabling to the triangle, one job under the lab's `release-tp3` profile:
+- the `release` profile at TP3's limits: 1-8 streams, prefill to 500,000 tokens
+  (below the 524288 max-model-len), distinct prompts at 1, 4 and 8 streams;
+- arms r6d (`r6d-tp3.json`, the r6d image) and r6f
+  ([r6f-tp3-overlay.json](r6f-tp3-overlay.json): r6d-tp3 with r6f's sources mounted, the
+  overlay the TP4 arms use, and the FP32 head);
+- r6f's boot and `token_determinism.py --wide` are the simple test of the complete
+  solution on TP3 (owner, 2026-10-11).
+
+Open the session with `--production-config config/cluster.json`, the TP3 production
+profile.
