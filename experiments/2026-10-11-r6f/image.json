@@ -1,0 +1,52 @@
+{
+  "experiment": "experiments/2026-10-11-r6f",
+  "run": "r6f-image",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "image",
+      "config": "r6f-tp4.json",
+      "node": "dgx4",
+      "copies": [
+        [
+          "dgx4",
+          "10.14.1.1"
+        ],
+        [
+          "dgx4",
+          "10.34.1.3"
+        ],
+        [
+          "dgx1",
+          "dgx2-internal"
+        ]
+      ]
+    },
+    {
+      "kind": "measure",
+      "bench": false,
+      "bracket": false,
+      "extras": [
+        [
+          "experiments/2026-10-09-tilelang-migration/token_determinism.py",
+          [
+            "--tokens",
+            "192",
+            "--long-lines",
+            "700",
+            "--wide"
+          ],
+          "determinism"
+        ]
+      ],
+      "arms": [
+        {
+          "config": "r6f-tp4.json",
+          "label": "r6f-image"
+        }
+      ]
+    }
+  ]
+}
