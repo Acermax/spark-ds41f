@@ -71,7 +71,15 @@ class RowTrace:
         self, label: str, tensors, start: int = 0, local_rows: int | None = None
     ):
         """Digests of the matched rows of ``tensors`` (rows ``start`` onward of the step
-        held locally, as under sequence parallelism)."""
+        held locally, as under sequence parallelism). A sequence-parallel layer's
+        unreduced parts (``RankOrderParts``) are digested by their rank-order sum, the
+        value a step without sequence parallelism holds there."""
+        if not self.matched:
+            return
+        tensors = [
+            t.sum() if t is not None and not isinstance(t, torch.Tensor) else t
+            for t in tensors
+        ]
         for row, (position, token) in self.matched.items():
             local = row - start
             if local < 0 or (local_rows is not None and local >= local_rows):
