@@ -1,0 +1,25 @@
+{
+  "experiment": "experiments/2026-10-11-c16-profile",
+  "run": "c16-profile-w1",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "profile",
+      "workloads": [
+        "code16"
+      ],
+      "arms": [
+        {
+          "config": "r6d-prof.json",
+          "label": "r6d"
+        },
+        {
+          "config": "r6f-prof.json",
+          "label": "r6f"
+        }
+      ]
+    }
+  ]
+}

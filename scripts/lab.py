@@ -559,6 +559,9 @@ PROFILE_WORKLOADS = {
     "decode": ("profile_decode.py", ["--tokens", "128"]),
     "c8": ("profile_c8.py", ["--case", "json", "--streams", "8", "--tokens", "128"]),
     "prefill": ("profile_prefill.py", ["--tokens", "16384"]),
+    # The bench's code point at sixteen streams (the experiment's profile_c8.py needs a
+    # code case).
+    "code16": ("profile_c8.py", ["--case", "code", "--streams", "16", "--tokens", "256"]),
 }
 
 
