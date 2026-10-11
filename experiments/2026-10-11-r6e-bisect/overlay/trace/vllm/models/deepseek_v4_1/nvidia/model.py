@@ -906,6 +906,8 @@ class DeepseekV4Model(nn.Module, EagleModelMixin):
                     hidden_states, residual, post_mix, res_mix
                 )
 
+        if trace is not None:
+            trace.end()
         if not get_pp_group().is_last_rank:
             if decoder_compacted:
                 hidden_states = scatter_rows(

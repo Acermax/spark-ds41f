@@ -59,6 +59,12 @@ class RowTrace:
             with open(path) as f:
                 self.targets = {(int(p), int(t)) for p, t in json.load(f)["rows"]}
 
+    def end(self) -> None:
+        """The traced forward is over: later sublayers (the drafter's) record nothing."""
+        global ACTIVE
+        if ACTIVE is self:
+            ACTIVE = None
+
     def begin(self, positions: torch.Tensor, input_ids: torch.Tensor | None) -> None:
         global ACTIVE
         ACTIVE = self
@@ -92,6 +98,8 @@ class RowTrace:
             local = row - start
             if local < 0 or (local_rows is not None and local >= local_rows):
                 continue
+            if any(t is not None and local >= t.shape[0] for t in tensors):
+                continue  # not this forward's rows
             digests = [None if t is None else _digest(t[local]) for t in tensors]
             self.out.write(
                 json.dumps(

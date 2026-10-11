@@ -25,7 +25,7 @@ BASE = ROOT / "experiments/2026-10-10-r6d-deterministic/r6d-tp4.json"
 R6D = "r6d-candidate"  # the vLLM branch of the r6d image's tree
 TREE = "/opt/spark3/candidate/vllm"
 ROUTER = "56bb63bb4"  # r6e-draft2 + a router test across step sizes
-TRACE = "c54915432"  # r6e-draft2 + the debug row trace (SP parts, Engram, layer stages, routing)
+TRACE = "f9669d2c4"  # r6e-draft2 + the debug row trace (SP parts, Engram, stages, routing; target only)
 # (label, r6e-draft2 commit, FP32 head): each prefix adds one piece.
 PREFIXES = [
     ("p1-allreduce", "a0d2d1fd1", False),  # SP WO slices, fused SP sum, rank-order all-reduce
