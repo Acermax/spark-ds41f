@@ -8,7 +8,7 @@
     {
       "kind": "profile",
       "workloads": [
-        "code16"
+        "c8"
       ],
       "arms": [
         {
