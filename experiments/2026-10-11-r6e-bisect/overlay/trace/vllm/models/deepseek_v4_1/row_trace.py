@@ -40,6 +40,7 @@ class RowTrace:
         os.chmod(DIR, 0o777)  # the host side writes spec.json and renames logs
         self.rank, self.step, self.mtime = rank, 0, None
         self.model = next(_INSTANCES)  # which model of the process recorded a line
+        self.layer = -1  # the decoder layer in progress, for its sublayers' labels
         self.targets: set[tuple[int, int]] = set()
         self.matched: dict[int, tuple[int, int]] = {}
         self.rows = 0

@@ -129,3 +129,34 @@ The trace session again, on vLLM `c2615923f`:
   projection, and this rank's gated rows (`engram1_hash`, `_rows`, `_kv`, `_out`);
 - the session keys labels by model, lists each row's differing labels in order, and
   names the colliding rows of an ambiguous match.
+
+### Window 4 results (2026-10-11, 15:28-15:30 UTC)
+
+Row 21 (generated, in the 6814-row mixed step): every Engram stage of layer 1 is
+identical (`engram0_hash`, `_rows`, `_kv`, `_out`), yet layer 1's output differs. The
+difference arises after Engram, in layer 1's attention, mHC or MoE. Those same
+operations left layer 0 identical. So the batch dependence is sparse and depends on the
+values, not on the row:
+- an ulp-level difference that matters only at a discrete boundary, such as top-k near
+  a tie or an FP8 rounding edge;
+- here it is crossed at layer 1, not at layer 0.
+
+The ambiguous rows are now named. Prompt rows 15-17 collide with another prompt's
+rows at the same positions in step 160. A step can hold two requests whose chat
+templates put the same token at the same position.
+
+One candidate stood out reading the code. Steps up to the gate's split rows route
+through a fused gate router (the gate's split-K partials reduced and routed in one
+kernel). Larger steps run the gate linear and then TileKernels' routing. The test
+compares the two bit for bit at the same row count, not across row counts.
+
+## Window 5 ([w5.json](w5.json))
+
+The trace on vLLM `c54915432`. Each decoder layer records:
+- the residual entering an Engram layer;
+- the attention input and output;
+- the FFN input.
+
+The routers record every routed row's weights and expert ids under one label (`L<i>_route`)
+whichever path routed it, and its gate logits under the path's label. The first
+differing label inside layer 1 names the stage.

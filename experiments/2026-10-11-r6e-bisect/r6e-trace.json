@@ -151,6 +151,11 @@
         "ro"
       ],
       [
+        "{home}/projects/spark-ds41f/experiments/2026-10-11-r6e-bisect/overlay/trace/vllm/models/deepseek_v4_1/tilelang/router.py",
+        "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/router.py",
+        "ro"
+      ],
+      [
         "{home}/projects/spark-ds41f/experiments/2026-10-11-r6e-bisect/overlay/trace/vllm/models/deepseek_v4_1/tilelang/vocab.py",
         "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/vocab.py",
         "ro"
