@@ -38,6 +38,10 @@ def main():
     cluster["container"]["mounts"] += [
         [f"{{home}}/projects/spark-ds41f/{REL}/overlay/allreduce/{path}", f"{TREE}/{path}", "ro"] for path in files]
     (HERE / "allreduce.json").write_text(json.dumps(cluster, indent=2) + "\n")
+    # Window 2's bisect: the same arm with the Engram rows read before the forward.
+    sync = json.loads(json.dumps(cluster))
+    sync["environment"]["SPARK3_ENGRAM_ASYNC"] = "0"
+    (HERE / "allreduce-sync.json").write_text(json.dumps(sync, indent=2) + "\n")
     bundle = HERE / "bundles" / "allreduce"
     bundle.mkdir(parents=True, exist_ok=True)
     mounts = []
