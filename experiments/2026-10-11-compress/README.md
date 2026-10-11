@@ -55,3 +55,29 @@ Acceptance:
 - temperature-0 identical within the arm;
 - the bench faster than B12X's path at every step (the owner's bar);
 - step time at or above r6d, and paired acceptance level.
+
+### Window 1 (2026-10-11, 12:05-12:16 UTC)
+
+**Kernel bundle:** the bench passed outright.
+- **Speed:** faster than B12X's whole path at every step and both ratios, with the
+  same FP64 error at every size.
+  - Ratio 1: 17.1-17.3 against 1.7-2.1 us warm at decode, about 10x; 31.5 against
+    24.7 us at 8192 prefill rows.
+  - Ratio 2: 31.6-36.3 against 6.4-6.7 us at decode, about 5x; 328 against 191 us at
+    8192 rows.
+- **Expected serving gain:** about 0.8 ms of a 31.5 ms c1 step.
+- **Tests:** two failed, both on the test's side.
+  - The random block table could give two requests one ring block, so their saves
+    raced.
+  - One element was 2 BF16 ulps from the torch arithmetic. The library exp and the
+    reduction order can each move an FP32 bit.
+  - vLLM `0157ed22a` gives each request its own block and allows two ulps.
+
+**Serving:** the arm did not boot.
+- The KV allocator pads its pages, so the ring pool's rows are strided. The kernels
+  declared it packed: "gather_partial_state input pool strides[0] violates packed ABI
+  constraint".
+- vLLM `e849609f9`, on top, takes the pool with its row stride, and the tests use a
+  padded pool.
+
+Window 2 ([w2.json](w2.json)) is window 1 again.
