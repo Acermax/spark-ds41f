@@ -129,3 +129,35 @@ reach B12X's whole WO (214 and 808 us).
 Window 5 ([w5.json](w5.json), kernel only) reruns the bench at `726be4365`. The bench
 now times TileLang's parts alone (inverse RoPE, WO-A, WO-B with its activation cast)
 and judges the floor per bucket.
+
+### Window 5 (2026-10-11, 14:56 UTC, kernel only)
+
+- **Correctness:** WO tests passed (9). No size differs from its full batch, every
+  size is repeatable (0 of 200), and the error is below B12X's.
+- **Parts alone, warm (us):**
+
+  | rows | inverse RoPE | WO-A | WO-B with its cast |
+  |---|---|---|---|
+  | 1-16 | 1.2 | 10.7-11.4 | 8.1-8.6 |
+  | 24-64 | 1.2-1.3 | 13.6-19.8 | 10.4-17.8 |
+  | 72-96 | 1.4-1.5 | 34.5-34.7 | 32.7-33.1 |
+  | 512 | 3.0 | 131 | 94 |
+  | 2048 | 7.1 | 458 | 360 |
+  | 8192 | 93 | 1916 | 1352 |
+
+- **Whole WO against B12X, warm / cold:** 1.00-1.16 / 1.03-1.05 at 1-16 rows,
+  1.07-1.30 / 1.04-1.05 at 24-64, 1.17-1.28 / 1.22-1.25 at 72-96, 1.25 / 1.37 at 512,
+  1.05 / 1.07 at 2048, 0.76 / 0.74 at 8192.
+- **Not cleaner than window 4.** B12X's own warm time moved by about 20% between the
+  windows (29 against 24 us at one row), so the ratios move with the run.
+  - TileLang's warm whole call (32 us at one row) is well above the sum of its parts
+    (20 us). Back to back, WO-A's and WO-B's weights (8 and 10 MB) likely do not
+    both stay in L2.
+  - The sweep chose its tiles warm, with WO-A's weight alone in L2. Fewer, wider CTAs
+    are worse when part of the weight streams from DRAM.
+  - The cold whole call improved (98-100 against 101-103 us at decode).
+
+The kernel bench cannot settle this. Serving can: the L2 prefetch stages each layer's
+WO weights ahead of the step. [r6e pieces window 1](../2026-10-11-r6e-candidate/w5.json)
+screens r6e + WO-BF16 (vLLM `r6e-wobf16` `25d1f3cf2`: these commits on r6e) against r6e,
+with the acceptance sweep because BF16 WO-A changes the bits.

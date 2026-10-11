@@ -1,6 +1,6 @@
 {
-  "experiment": "experiments/2026-10-11-moe-fold",
-  "run": "moe-fold-w1",
+  "experiment": "experiments/2026-10-11-r6e-candidate",
+  "run": "r6e-pieces-w1",
   "jobs": [
     {
       "kind": "sync"
@@ -11,6 +11,10 @@
         {
           "node": "dgx1",
           "bundle": "experiments/2026-10-11-moe-fold/bundles/fold"
+        },
+        {
+          "node": "dgx2",
+          "bundle": "experiments/2026-10-11-wo-bf16/bundles/r6e-wobf16"
         }
       ]
     },
@@ -61,16 +65,28 @@
             "3"
           ],
           "mixed"
+        ],
+        [
+          "scripts/acceptance_sweep.py",
+          [
+            "--tokens",
+            "256"
+          ],
+          "sweep"
         ]
       ],
       "arms": [
         {
-          "config": "experiments/2026-10-11-r6e-candidate/r6e.json",
+          "config": "r6e.json",
           "label": "r6e"
         },
         {
-          "config": "r6e-fold.json",
+          "config": "experiments/2026-10-11-moe-fold/r6e-fold.json",
           "label": "fold"
+        },
+        {
+          "config": "experiments/2026-10-11-wo-bf16/r6e-wobf16.json",
+          "label": "wobf16"
         }
       ]
     }

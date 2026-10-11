@@ -3,6 +3,9 @@
 changes, taken from the vLLM branch, mounted over the r6d image;
 and the kernel bundle of their tests.
 
+Also the r6e-wobf16 arm: the r6e candidate (vLLM branch r6e-draft2) with the same WO
+commits on top (vLLM branch r6e-wobf16), with the FP32 head as r6e, and its WO test bundle.
+
 usage: make_arms.py [--vllm ~/projects/vllm-ds41-tilelang-migration]
 """
 import argparse
@@ -16,6 +19,7 @@ REL = HERE.relative_to(ROOT).as_posix()
 BASE = ROOT / "experiments/2026-10-10-r6d-deterministic/r6d-tp4.json"
 R6D = "r6d-candidate"  # the vLLM branch of the r6d image's tree
 ARM = "726be4365"  # B1 switch on the W8A16 WO-A module: four K shards, path and tile per bucket
+R6E_ARM = "25d1f3cf2"  # r6e-draft2 + the WO commits, through the per-bucket tiles
 TREE = "/opt/spark3/candidate/vllm"
 TESTS = ["tests/kernels/quantization/test_deepseek_v41_tilelang_wo.py"]
 KBENCH = ROOT / "experiments/2026-10-09-tilelang-migration/kbench.py"
@@ -59,6 +63,30 @@ def main():
                  "verdict": "exit", "mounts": mounts}
     (bundle / "candidate.json").write_text(json.dumps(candidate, indent=2) + "\n")
     print(f"overlay/wobf16: {len(files)} files ({', '.join(files)}); wobf16.json; bundles/wobf16")
+    # The same WO commits on the r6e candidate.
+    files = [p for p in git("diff", "--name-only", R6D, R6E_ARM).decode().split() if p.startswith("vllm/")]
+    for path in files:
+        out = HERE / "overlay" / "r6e-wobf16" / path
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(git("show", f"{R6E_ARM}:{path}"))
+    r6e = json.loads(BASE.read_text())
+    r6e["container"]["mounts"] += [
+        [f"{{home}}/projects/spark-ds41f/{REL}/overlay/r6e-wobf16/{path}", f"{TREE}/{path}", "ro"] for path in files]
+    r6e["environment"]["VLLM_DS41_HEAD_DTYPE"] = "float32"
+    (HERE / "r6e-wobf16.json").write_text(json.dumps(r6e, indent=2) + "\n")
+    bundle = HERE / "bundles" / "r6e-wobf16"
+    bundle.mkdir(parents=True, exist_ok=True)
+    mounts = []
+    for path in [*files, *TESTS]:
+        name = path.replace("/", "__")
+        (bundle / name).write_bytes(git("show", f"{R6E_ARM}:{path}"))
+        mounts.append([name, f"{TREE}/{path}"])
+    tests = {"description": "The WO tests on the r6e candidate with BF16 WO-A, in the r6d image.",
+             "image": r6e["container"]["image"], "env": {"HF_HUB_OFFLINE": "1"}, "workdir": TREE,
+             "argv": ["-m", "pytest", "-q", "--noconftest", "-p", "no:cacheprovider", "-rfE", *TESTS],
+             "verdict": "exit", "mounts": mounts}
+    (bundle / "candidate.json").write_text(json.dumps(tests, indent=2) + "\n")
+    print(f"overlay/r6e-wobf16: {len(files)} files; r6e-wobf16.json; bundles/r6e-wobf16")
 
 
 if __name__ == "__main__":
