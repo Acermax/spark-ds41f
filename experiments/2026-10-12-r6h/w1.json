@@ -1,0 +1,74 @@
+{
+  "experiment": "experiments/2026-10-12-r6h",
+  "run": "r6h-config-w1",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "measure",
+      "bench": false,
+      "bracket": false,
+      "extras": [
+        [
+          "scripts/distinct_streams.py",
+          [
+            "--streams",
+            "16",
+            "--samples",
+            "6",
+            "--tokens",
+            "256"
+          ],
+          "c16-distinct"
+        ],
+        [
+          "scripts/distinct_streams.py",
+          [
+            "--streams",
+            "8",
+            "--samples",
+            "6",
+            "--tokens",
+            "256"
+          ],
+          "c8-distinct"
+        ]
+      ],
+      "arms": [
+        {
+          "config": "w1-base.json",
+          "label": "base"
+        },
+        {
+          "config": "w1-head.json",
+          "label": "head"
+        },
+        {
+          "config": "w1-curves.json",
+          "label": "curves"
+        },
+        {
+          "config": "w1-base-again.json",
+          "label": "base-again"
+        }
+      ]
+    },
+    {
+      "kind": "profile",
+      "workloads": [
+        "code16"
+      ],
+      "arms": [
+        {
+          "config": "w1-base-fixed.json",
+          "label": "base"
+        },
+        {
+          "config": "w1-head-fixed.json",
+          "label": "head"
+        }
+      ]
+    }
+  ]
+}
