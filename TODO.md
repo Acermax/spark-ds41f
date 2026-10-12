@@ -31,20 +31,91 @@ Acceptance on this traffic is far below the bench's code answers (3.1 accepted
 per step), so the bench overstates what long drafts buy. Capture whole scans
 before tuning anything on this basis.
 
+## Next release
+
+Ideas recorded while making r6f, r6g and r6h (2026-10-11 to 2026-10-12). Bound
+each one from existing traces before building it, and build one piece per
+branch.
+
+**Where r6h stands** ([promotion record](experiments/2026-10-12-r6h/README.md)).
+On TP4 it is level with or ahead of r6d on every text-independent metric. On TP3
+it is identical at temperature 0 and level at four prompts, but trails r6d by
+1.6% ±0.6 at eight prompts and by 1.2-1.5% on prefill. The next release must beat
+r6h on every metric on both topologies.
+
+1. **Draft acceptance across prompts** (owner focus, 2026-10-12). On one fixed
+   prompt, r6h's precision changes moved one-stream throughput by +21% on code
+   (accepted drafts per step 1.75 to 2.37) and -5% on prose (1.26 to 1.13), on
+   the same kernels. That swing is larger than any kernel change in the release.
+   Measure acceptance on the paired sixteen-prompt sweep, never on one prompt.
+   Starting points are draft depth by load, per-request depth and the
+   verification objective (Speculative decoding).
+2. **TP3's remaining cost.** Each TP3 rank holds a third of the vocabulary and
+   experts, so the exact-arithmetic costs weigh more there. The head fix of r6h
+   never applies: TP3 steps have at most 48 rows.
+   - mHC `project_streams` runs three TF32 GEMMs for its exact FP32 projection:
+     41.5 µs a call at 96 rows against r6d's 30.6 µs, before r6h's load-time
+     split took back 2-5 µs. Fold `finalize` into it (TileLang kernel family,
+     item 3). An FP32 FFMA product for N = 24 may recover the three-GEMM cost.
+   - MoE partials in FP32: the combine went from 12.0 to 16.7 µs at 96 rows, and
+     prefill chunks got 6.5% slower.
+   - Profile TP3 at fixed rows (1-48) against r6d, as
+     `experiments/2026-10-12-fixed-row-profile` did for TP4.
+3. **Vocabulary head.**
+   - **A 128-row token tile.** A head call with 65-128 rows takes 1.60-1.89 ms,
+     against 1.10-1.24 ms for one 64-row tile (r6h head bench). The second tile
+     reads the shard from L2 again and unpacks it a second time. The 64-row tile
+     already fills 98,304 of the 101,376 bytes of shared memory: four pipeline
+     stages of activations and packed weights. A 128-row tile fits in about
+     96 KB with two activation stages and four weight stages. The activations
+     come from L2, so they need a shallower pipeline than the weights. The bits
+     stay the same, since each output keeps its K order. Ceiling: about 1% of a
+     sixteen-stream TP4 step, and nothing on TP3 or at eight streams.
+   - **One-tile bandwidth.** One tile streams the 248 MB TP4 shard in 1.1-1.2 ms,
+     about 80% of GB10's DRAM peak. Every head call pays this, twice a step, and
+     TP3's shard is about 331 MB.
+   - **Greedy argmax in the head's epilogue.** Write each tile's (max, index)
+     pair instead of its FP32 logits: about 12 MB less written and read per TP4
+     call.
+4. **WO-A on BF16 activations.** This is the last known deviation from
+   DeepSeek's reference arithmetic: the reference keeps BF16 activations and
+   dequantizes the FP8 weights exactly. It belongs to the B1 port, and it
+   changes the output, so it is evaluated as a precision change.
+5. **Mixed traffic.** r6h's p95 gap between a stream's chunks read 90.0 and
+   93.1 ms against r6d's 86.6 ms, from one run each without an interval. Give the
+   release protocol's mixed-traffic rounds repeats and an interval before
+   reading anything into it.
+6. **Finish the TileLang migration** (TileLang kernel family, item 2): fewer
+   engines bridged in vLLM, kernels short enough to reason about, and neighbours
+   that can be fused.
+7. **Tooling.** `analyze_costs.py` no longer finds this build's step marker, so
+   normalize per step from draft events and streams by hand until it is fixed.
+
 ## Current reference
 
-`manifests/benchmarks/2026-10-05-karmic-kraken-r6.json`: r6 (the TileLang
-kernel family) on the 64 KiB kernel with the memory saver, 512K limit, 3.5 GiB
-of KV, 2,845,543 tokens. Aggregate tok/s across all streams, temperature 0,
-256 output tokens, reasoning on, mean ± 95% interval:
+`manifests/baselines/2026-10-12-karmic-kraken-r6h.json` (r6h). Releases are
+judged by the release comparison (`docs/lab.md`, `scripts/release_table.py`), on
+measures that do not follow the generated text. Aggregate tok/s, temperature 0,
+reasoning on; benchmark references are
+`manifests/benchmarks/2026-10-12-karmic-kraken-r6h-tp4.json` and
+`-r6h.json`:
 
-| Workload | 1 | 2 | 4 | 8 |
-|---|---:|---:|---:|---:|
-| Code, reasoning on | 63.0 ± 0.5% | 97.3 ± 8.5% | 159.2 ± 44.2% | 240.3 ± 1.0% |
-| Prose, reasoning on | 52.2 ± 0.7% | 84.4 ± 0.6% | 125.7 ± 0.5% | 198.6 ± 0.4% |
+| Measure | TP4 (1M, 16 sequences) | TP3 (512K, 8) |
+|---|---:|---:|
+| 4 different prompts at once | 136.5 | 107.1 |
+| 8 different prompts at once | 184.7 | 134.9 |
+| 16 different prompts at once | 226.5 | |
+| Prefill 32K, tok/s | 5,870 | 4,252 |
+| Prefill 256K | 5,496 | 4,060 |
+| Prefill 500K (TP3) / 512K (TP4) | 5,074 | 3,753 |
+| Prefill 1M | 4,391 | |
 
-Single-stream steps are 38.2 ms on prose and 42.4 ms on code (r5p's B12X:
-41.9 and 46.4). Source-text prefill is 4.3k tok/s at 32K, 4.0k at 256K and
+The bench's decode points send one prompt to every stream, so they follow the
+text through DSpark acceptance: quote them as direction only. The figures below
+are older.
+
+On r6, single-stream steps were 38.2 ms on prose and 42.4 ms on code (r5p's B12X:
+41.9 and 46.4), and source-text prefill was 4.3k tok/s at 32K, 4.0k at 256K and
 3.7k at 500K. The TP4 1M recipe's benchmark is in
 `experiments/2026-10-05-tilelang-r6`. Two- and four-stream code points have
 wide intervals (two-stream interleaving differs between samples); add samples
@@ -66,11 +137,23 @@ were measured on r5o:
 A step-time saving is a fixed cost per step. At one stream it converts almost
 fully into tok/s. At eight streams the step is longer (up to 48 verified rows,
 more distinct experts read), so the same saving is a smaller share. Report one
-and eight streams for every decode change.
+and eight streams for every decode change, and sixteen on TP4.
 
 ## Running a round
 
-- **Screen lean, promote thorough.** One boot per arm:
+- **Screen what the release judges.** Development screens are fixed-row step
+  cost at 1-96 rows (adaptive verification off) plus different prompts at the
+  recipe's concurrency, on TP4 and TP3, measured cumulatively against the
+  previous release and never slower anywhere. r6f's per-piece 3% budget hid a
+  1-5% sum.
+- **Release comparison.** One session, after 30 minutes at the maximum fan
+  floor: the candidate first (heat soak counts against the later arms), the
+  previous release second, the candidate again to bound drift. Promote on those
+  numbers without re-benching.
+- **Confirm a new path engages** (log it once) before trusting an A/B. r6g's
+  greedy-verification window measured nothing because its guard looked on the
+  wrapper model.
+- **Lean screen for quick checks.** One boot per arm:
   `bin/spark bench --suites quality,decode --decode-cases prose,code,prose-nothink,code-nothink --concurrency 1,8 --min-samples 3 --max-samples 3`
   (about 8 minutes with the boot). Run the full matrix only for a promotion
   candidate.
@@ -219,10 +302,8 @@ floor.
    verify lengths would issue mismatched collectives and hang. Removing it
    needs a confidence computation that is bitwise identical on every rank.
    Measure the broadcast's cost before spending effort on it.
-5. **Exact LM-head compression.** The target head is 441 MB per rank, read on
-   every step. Fifteen exponent values cover 99.984% of its weights, so an
-   exact coded form would be ~331 MB, worth ~0.45 ms per step (~1%). It needs
-   a custom exact GEMV for M ≤ 48 that is safe inside CUDA graphs. Low priority.
+5. **Exact LM-head compression** is done: the packed 12-bit head serves since
+   r5p. Its remaining levers are under Next release (vocabulary head).
 6. **A second stream inside the decode graph.** Overlap the shared expert with
    the routed MoE, and the attention key path (cache and indexer-key writes)
    with the query path, on a second CUDA stream captured into the graph. First
@@ -272,17 +353,9 @@ floor.
   (`experiments/2026-10-03-prose-speculation`): pinning removes the table as a
   variable, not the output-dependent sample noise. Boot patch 0046 (profile
   once when pinned curves match) is written and not promoted.
-- **Determinism.** `experiments/2026-09-29-determinism` found three sources: the
-  atomic routed-MoE combine, four-way split-K turbo, and a dense GEMM race that
-  also gave wrong shared-expert outputs (fixed in r5n). The batch-invariant
-  reference ref4f (`VLLM_DS41_BATCH_INVARIANT=1`) keeps every lean workload
-  within about 3% of r5o and passed the full validation; it still needs the
-  full measurement matrix and the owner's decision. Its traces reach 8,093
-  tokens, and its drafter is not batch-invariant, so acceptance still varies
-  with batch composition. A scheduling refinement of the sequential mHC kernel
-  is bit-identical and 3-4% faster at prefill sizes, and not in `mhc-seq` yet.
-  Outside batch invariance the same kernel (vllm-0050) read -4.6% on 16K
-  prefill once; repeat that before any production claim.
+- **Determinism** is done. Since r6f, temperature-0 outputs are identical alone
+  and in any batch, including fifteen streams with a long prompt arriving
+  mid-decode (`token_determinism.py --wide`). Run it on every candidate.
 
 ## Prefill and first token
 
@@ -406,10 +479,7 @@ preparation 24, KV setup and warmup 16, graph capture ~8 s of real work.
   NVFP4/W6A8 MoE releases, a SASS pass over kernels DS4.1 does not run, two
   single-stage write-after-read races in raw paged kernels, and mbarrier init fences.
 
-- **Temperature-0 outputs still vary between identical requests** on r5n: the
-  atomic MoE combine and split-K turbo change summation order run to run
-  (see the determinism item under decode).
-
+- **Temperature 0 is deterministic since r6f** (see Speculative decoding).
 - **Reasoning loops in long, compacted agent sessions.** Untested here, and
   reported on other DS4.1 stacks: after several context compactions, hidden
   reasoning degrades into short repeated lines and grows each turn. The
@@ -458,8 +528,9 @@ stays benchmarked in `experiments/2026-10-05-r5p-promotion`.
 - **Cabling decides the profile.** TP3 needs the dgx1-dgx2-dgx3 triangle and
   TP4 the four-node ring, each with a matching node map (the current site
   `config/nodes.json` is a triangle map). The cabling has changed back and
-  forth since 2026-10-02:
-  check the live links before starting either.
+  forth since 2026-10-02. Since PR #155 a start refuses a node map whose cable
+  subnets do not match the live links, and any change of node count or shape
+  without `--change-shape`; every `--apply` names its profile.
 - **Not selected, kept as experiments:** NIC-forwarded mesh4 and four fixed
   paths (`experiments/2026-10-02-rocenante-mesh4`, `-mesh4-fourpaths`).
 
@@ -475,9 +546,18 @@ alternative. The decode-kernel comparison is in
    serving profile; three Q-B tiles all measured 21.8-21.9 µs. B12X reads
    tile-packed weights. Try a tile-contiguous weight layout for the decode
    projections, kept bit-identical with prefill.
-2. **Port the remaining B12X kernels:** WO-A/WO-B, RoPE, the KV cache
-   writers, the compressor, the BF16 GEMVs and the checkpoint loader. Then
-   retire B12X.
+2. **Port the remaining kernels** (`experiments/2026-10-09-tilelang-migration`).
+   Ported in r6d-r6f: RoPE, the KV cache writers, the compressor and its
+   projection, the Engram gate and hash, the index weight scale and the
+   sparse-MLA metadata (the first Triton port). Remaining:
+   - B12X: B1 the fused WO projection (with WO-A on BF16), B6 the DSpark
+     context-KV projection, B10 the Engram row lookup, B11 head packing, B12 the
+     vision tower, the checkpoint loader and the Engram disk reader;
+   - CuTe DSL: C1 the L2 prefetch and C2 sparknet's collectives, both passed
+     and level with the control, not yet switched;
+   - Triton: the remaining DS4.1 model kernels and the V2 runner's (about 1% of
+     a decode step).
+   Then retire B12X.
 3. **mHC: fold `finalize` into `project_streams`.** After vLLM 0040 the
    sublayer entry is two launches: the projection (about 10.5 µs at one token
    with fn cold) and the per-token finalize (about 4 µs). Let the last CTA of
