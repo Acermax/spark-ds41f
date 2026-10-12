@@ -11,16 +11,16 @@
       "bracket": false,
       "arms": [
         {
-          "config": "experiments/2026-10-10-r6d-deterministic/r6d-tp4.json",
-          "label": "r6d"
-        },
-        {
           "config": "experiments/2026-10-12-r6h/r6h-tp4.json",
           "label": "r6h"
         },
         {
           "config": "experiments/2026-10-10-r6d-deterministic/r6d-tp4.json",
-          "label": "r6d-again"
+          "label": "r6d"
+        },
+        {
+          "config": "experiments/2026-10-12-r6h/r6h-tp4.json",
+          "label": "r6h-again"
         }
       ]
     }

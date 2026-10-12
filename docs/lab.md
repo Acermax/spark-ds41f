@@ -182,13 +182,16 @@ change in the numbers means a change in the release, not in the method:
 
 ```json
 {"kind": "measure", "profile": "release", "bracket": false,
- "arms": [{"config": "<previous release>.json", "label": "<previous>"},
-          {"config": "<candidate>.json", "label": "<candidate>"}]}
+ "arms": [{"config": "<candidate>.json", "label": "<candidate>"},
+          {"config": "<previous release>.json", "label": "<previous>"},
+          {"config": "<candidate>.json", "label": "<candidate>-again"}]}
 ```
 
-- **One session, previous release first.** Both arms run back to back on the same
-  boot conditions. The previous release is the first arm, and every verdict is
-  against it.
+- **One session, candidate first.** The arms run back to back on the same boot
+  conditions. The candidate goes first, so heat soak never counts against it, and runs
+  again last to bound the session's drift. Read the verdicts against the previous
+  release: `scripts/release_table.py RUN <previous> <candidate> <candidate>-again`
+  (the table compares each listed arm with the first listed, in argv order).
 - **The `release` profile (`scripts/lab.py`):**
   - quality;
   - decode on prose and code at 1, 2, 4, 8 and 16 streams, 5-10 samples until each

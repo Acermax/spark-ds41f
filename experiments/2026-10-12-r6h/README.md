@@ -79,3 +79,8 @@ with the `-r6h` image and its own cost curves, `tp3-r6h-20261012`, profiled on i
 boot) on the triangle: quality, prefill at 32K / 256K / 500K (two repeats),
 determinism `--wide`, the paired acceptance sweep, and four and eight different prompts
 at once. The bench's one-prompt decode points and the latency extras are left out.
+
+Arm order (owner, 2026-10-12): the candidate first, so heat soak does not count against
+it, and again last for drift. The TP3 comparison had already started in the old order
+(r6d first, r6h second), so its r6h numbers are conservative. The TP4 comparison runs
+r6h / r6d / r6h again.
