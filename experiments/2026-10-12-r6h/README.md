@@ -63,6 +63,10 @@ head bench, bit-identical: one tile (up to 64 rows) unchanged at 1.10-1.24 ms a 
 two tiles 2.29-2.38 ms with vocabulary blocks fastest, 1.60-1.89 ms with token tiles
 fastest (80 rows: 2.34 to 1.65 ms; the drafter's call at sixteen streams).
 
+In serving the grid change does not pay: the served head lives in the uncached display
+carve-out, where the second tile cannot reuse L2, and reads 2.22 ms a call. With the head
+in regular memory it reads 1.73 ms ([r6h-loss](../2026-10-12-r6h-loss/README.md)).
+
 ## r6h
 
 r6g's series and vLLM `r6h-mhc-fused-split` (0115-0117): patch head `e39cd9da9938`,
