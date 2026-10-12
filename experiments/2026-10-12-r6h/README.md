@@ -28,3 +28,18 @@ No code change, same bits:
 
 base / head / curves / base again, six samples of sixteen and eight different prompts,
 then a fixed-row profile of base and head (the head GEMM a call).
+
+## Window 2 ([w2.json](w2.json)): three kernel changes, bit-identical by construction
+
+vLLM branch `r6h-mhc-fused-split` (on r6g's `fbaa04151`):
+- `544ee7703` mHC: fn split into its TF32 parts while loading it
+  ([mhc-split](../2026-10-12-mhc-split/README.md): bit-identical, 2-5 µs a call);
+- `54af64774` MoE: the folded combine loads the shared row before the routes;
+- `7fd70268a` vocabulary heads: token tiles vary fastest. Past 64 rows a head call has
+  two token tiles; with vocabulary blocks fastest the second tile re-read the whole
+  248 MB shard from DRAM (about 2.2 ms a 96-row call). At sixteen streams the drafter's
+  head call always has 80 rows, so every step paid it; r6d has the same kernel.
+
+[bundles/kernels](bundles/kernels) runs the mHC, MoE and vocabulary head tests with the
+three files (dgx1); [bundles/head](bundles/head) times the head per call with both grids
+and compares the outputs bit for bit (dgx2).

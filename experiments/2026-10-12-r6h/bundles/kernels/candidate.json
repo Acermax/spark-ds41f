@@ -1,0 +1,47 @@
+{
+  "description": "r6h kernels: the fused mHC split, the folded combine's early shared load and the head's token-tiles-fastest grid, against the mHC, MoE and vocabulary head tests.",
+  "image": "vllm-ds41f-kkref:19f2c20ed4d6-r6g",
+  "env": {
+    "HF_HUB_OFFLINE": "1"
+  },
+  "workdir": "/opt/spark3/candidate/vllm",
+  "argv": [
+    "-m",
+    "pytest",
+    "-q",
+    "--noconftest",
+    "-p",
+    "no:cacheprovider",
+    "-rfE",
+    "tests/kernels/test_deepseek_v41_tilelang_mhc.py",
+    "tests/kernels/moe/test_deepseek_v41_tilelang_moe.py",
+    "tests/kernels/quantization/test_deepseek_v41_tilelang_vocab.py"
+  ],
+  "verdict": "exit",
+  "mounts": [
+    [
+      "vllm__models__deepseek_v4_1__tilelang__mhc.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/mhc.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__tilelang__moe.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/moe.py"
+    ],
+    [
+      "vllm__models__deepseek_v4_1__tilelang__vocab.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/tilelang/vocab.py"
+    ],
+    [
+      "tests__kernels__test_deepseek_v41_tilelang_mhc.py",
+      "/opt/spark3/candidate/vllm/tests/kernels/test_deepseek_v41_tilelang_mhc.py"
+    ],
+    [
+      "tests__kernels__moe__test_deepseek_v41_tilelang_moe.py",
+      "/opt/spark3/candidate/vllm/tests/kernels/moe/test_deepseek_v41_tilelang_moe.py"
+    ],
+    [
+      "tests__kernels__quantization__test_deepseek_v41_tilelang_vocab.py",
+      "/opt/spark3/candidate/vllm/tests/kernels/quantization/test_deepseek_v41_tilelang_vocab.py"
+    ]
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "experiment": "experiments/2026-10-12-r6h",
+  "run": "r6h-kernels-w2",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "kernel",
+      "bundles": [
+        {
+          "node": "dgx1",
+          "bundle": "experiments/2026-10-12-r6h/bundles/kernels"
+        },
+        {
+          "node": "dgx2",
+          "bundle": "experiments/2026-10-12-r6h/bundles/head"
+        }
+      ]
+    }
+  ]
+}

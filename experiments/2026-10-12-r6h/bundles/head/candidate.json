@@ -1,0 +1,9 @@
+{
+  "description": "Packed vocabulary head per call: base grid against token tiles fastest, TP4 shard, 16-128 rows, bit for bit.",
+  "image": "vllm-ds41f-kkref:19f2c20ed4d6-r6g",
+  "env": {"HF_HUB_OFFLINE": "1"},
+  "workdir": "/opt/spark3/candidate/vllm",
+  "argv": ["/b/bench_head.py", "vocab_base", "vocab_swap"],
+  "verdict": "exit",
+  "mounts": [["vocab_base.py", "/b/vocab_base.py"], ["vocab_swap.py", "/b/vocab_swap.py"], ["bench_head.py", "/b/bench_head.py"]]
+}
