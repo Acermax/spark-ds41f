@@ -1,7 +1,7 @@
 {
  "schema_version": 1,
  "status": "promoted-baseline",
- "captured_at": "PENDING",
+ "captured_at": "20261012T090805Z",
  "container_name": "dsv41-karmic-kraken",
  "image_tag": "vllm-ds41f-kkref:19f2c20ed4d6-r6h",
  "image_id": "sha256:0aaa5d8b9d753218ef65a06eef8430935b48816ef369175ce65745783d3b64d6",
@@ -40,7 +40,7 @@
   "nccl_patch_head": "eeacf1c6343f0499e4e7ab20ec7eecfb6f62eda6",
   "nccl_tree": "6af10aa730a64fcee8781d62340a9c9184e79469",
   "runtime_base_image": "docker.io/vllm/vllm-openai@sha256:3cf14c52765a0f0c2f09035e05fa79e1e4b2f9788b64afa90fa41c1ff12d29cf",
-  "image_build_deployment_commit": "PENDING",
+  "image_build_deployment_commit": "362549d71d115fcb28c9c7daf8d275cca4feb657",
   "model_revision": "dba1be0a40aa45a94ad051997016db3960a90277",
   "image_build_recipe": "bin/spark build (docker/Dockerfile, runtime-tilelang-sparknet stage)",
   "tilelang_repository": "https://github.com/tile-ai/tilelang",
@@ -126,7 +126,7 @@
    "experiments/2026-10-12-fixed-row-profile/",
    "experiments/2026-10-12-mhc-split/"
   ],
-  "summary": "PENDING"
+  "summary": "Release comparison on TP4, 2026-10-12 from 07:48 UTC on the ring, after a 30-minute cool-down at the maximum fan floor, candidate first (r6h / r6d / r6h again): temperature 0 identical in every scenario with r6f's references (7ae87256d3ea / b8b35451dcc4), r6d 13 of 16 differing in mixed15; quality 5/5; paired 16-prompt sweep +2.6% +-2.5%; different prompts at once +1.9% / +3.5% / +1.1% at 4 / 8 / 16 streams (8 faster beyond its interval, 4 and 16 level); real-text prefill +1.5 / +1.0 / +1.3 / +1.5 / +1.0% at 32K / 128K / 256K / 512K / 1M (faster at every size); mixed-traffic p95 stream gap +3.9% (single run, no interval); no thermal slowdown. TP3 trimmed comparison, 2026-10-12 06:40-07:09 UTC on the triangle (r6d first): identical at temperature 0, quality 5/5, 4 prompts -0.4% +-1.1% (level), 8 prompts -1.6% +-0.6%, prefill -1.2 / -1.5 / -1.2% at 32K / 256K / 500K; owner: a meaningful improvement over r6f, with the TP3 shortfall moved to next week's release. The image gate (experiments/2026-10-12-r6h/image.json) reproduced r6f's references with and without logprobs."
  },
  "build": {
   "image": "vllm-ds41f-kkref:19f2c20ed4d6-r6h",

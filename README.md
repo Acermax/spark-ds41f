@@ -4,13 +4,15 @@ Reproducible Docker/vLLM deployment, tuning, and benchmarks for DeepSeek V4.1
 Flash on a switchless three-node DGX Spark fabric, and the same deployment on
 a four-node ring.
 
-Production is the four-node TP4 1M profile on **r6f** (2026-10-11,
-[promotion record](experiments/2026-10-11-r6f/README.md)), and the three-node
-profiles are promoted to r6f too. r6f is r6d plus arithmetic at DeepSeek's
-reference precision (FP32 logits, an exact FP32 mHC projection, the shared
-expert's SwiGLU in FP32, MoE partials rounded once), more TileLang ports and a
-per-request attention split, so temperature-0 outputs do not depend on the
-batch even when decode requests share a step with a prefill.
+Production is the four-node TP4 1M profile on **r6h** (2026-10-12,
+[promotion record](experiments/2026-10-12-r6h/README.md)), and the three-node
+profiles are promoted to r6h too. r6h computes at DeepSeek's reference
+precision (FP32 logits, an exact FP32 mHC projection, the shared expert's
+SwiGLU in FP32, MoE partials rounded once) with temperature-0 outputs that do
+not depend on the batch, as r6f did, and adds bit-identical decode work: the
+shared expert folded into the MoE combine at decode, greedy verification from
+vocabulary shards, the vocabulary head reading its weights once per call, and
+DSpark cost curves profiled for the image.
 
 The promoted kernel family is **TileLang** (r6): TileLang kernels for SM121,
 with DeepSeek's TileKernels and the one-shot RoCE collectives of
@@ -84,8 +86,8 @@ until the profile's kernel, fabric and image checks pass.
 ## Current baseline
 
 The baseline for both shapes is
-[manifests/baselines/2026-10-11-karmic-kraken-r6f.json](manifests/baselines/2026-10-11-karmic-kraken-r6f.json)
-([promotion record](experiments/2026-10-11-r6f/README.md); see
+[manifests/baselines/2026-10-12-karmic-kraken-r6h.json](manifests/baselines/2026-10-12-karmic-kraken-r6h.json)
+([promotion record](experiments/2026-10-12-r6h/README.md); see
 [docs/current-state.md](docs/current-state.md)). The three-node deployment:
 
 - three DGX Spark nodes using tensor parallelism 3, on DGX Spark 26.09.2 with
@@ -174,43 +176,39 @@ To reproduce the deployment on your own Sparks, follow
 
 ## Performance
 
-r6f against r6d (2026-10-11), measured with the
-[release comparison](docs/lab.md#release-comparison): both releases in one
-session per topology, r6d first
-([results](experiments/2026-10-11-r6f-release-bench/README.md); reports for
-[TP4](manifests/benchmarks/2026-10-11-karmic-kraken-r6f-tp4.json) and
-[TP3](manifests/benchmarks/2026-10-11-karmic-kraken-r6f.json)). Each change is
-shown with its combined 95% interval and counts (**bold**) only beyond it.
+r6h against r6d (2026-10-12), measured with the
+[release comparison](docs/lab.md#release-comparison) in one session per
+topology ([results](experiments/2026-10-12-r6h/README.md); reports for
+[TP4](manifests/benchmarks/2026-10-12-karmic-kraken-r6h-tp4.json) and
+[TP3](manifests/benchmarks/2026-10-12-karmic-kraken-r6h.json)). TP4 ran the
+candidate first after a 30-minute cool-down; the TP3 run is trimmed and ran r6d
+first. Each change is shown with its combined 95% interval and counts (**bold**)
+only beyond it.
 
-| Workload | TP4 r6d | TP4 r6f | TP3 r6d | TP3 r6f |
+| Workload | TP4 r6d | TP4 r6h | TP3 r6d | TP3 r6h |
 | --- | ---: | ---: | ---: | ---: |
-| Temperature 0, 15 streams + a long prompt (requests differing) | 14 of 16 | **0 of 16** | 0 of 16 | 0 of 16 |
+| Temperature 0, 15 streams + a long prompt (requests differing) | 13 of 16 | **0 of 16** | 1 | **0** |
 | Quality gate | 5/5 | 5/5 | 5/5 | 5/5 |
-| Source-text prefill, 32K (tok/s) | 5,780 | 5,842 (**+1.1%** ±1.0) | 4,377 | 4,346 (-0.7%) |
-| Prefill, 128K | 5,634 | 5,763 (**+2.3%** ±1.4) | 4,237 | 4,260 (+0.5%) |
-| Prefill, 256K | 5,398 | 5,490 (**+1.7%** ±0.3) | 4,060 | 4,068 (+0.2%) |
-| Prefill, 512K (TP3 500K) | 4,989 | 5,064 (**+1.5%** ±0.4) | 3,770 | 3,774 (+0.1%) |
-| Prefill, 1M | 4,321 | 4,377 (**+1.3%** ±0.2) | | |
-| Decode, 1 stream, 16 prompts paired | | -0.1% ±2.4 | | -1.9% ±2.1 |
-| Decode, 4 different prompts at once (tok/s) | 132.1 | 133.1 (+0.7% ±2.4) | 107.3 | 104.0 (**-3.1%** ±0.2) |
-| Decode, 8 different prompts at once | 175.8 | 175.4 (-0.2% ±1.1) | 136.1 | 135.0 (-0.8% ±1.0) |
-| Decode, 16 different prompts at once | 222.1 | 218.0 (**-1.8%** ±0.6) | | |
+| Decode, 1 stream, 16 prompts paired | | **+2.6%** ±2.5 | | -1.0% ±2.3 |
+| Decode, 4 different prompts at once (tok/s) | 134.0 | 136.5 (+1.9% ±2.1) | 107.5 | 107.1 (-0.4% ±1.1) |
+| Decode, 8 different prompts at once | 178.5 | 184.7 (**+3.5%** ±1.5) | 137.2 | 134.9 (**-1.6%** ±0.6) |
+| Decode, 16 different prompts at once | 224.1 | 226.5 (+1.1% ±1.5) | | |
+| Source-text prefill, 32K (tok/s) | 5,781 | 5,870 (**+1.5%** ±0.8) | 4,304 | 4,252 (-1.2% ±1.5) |
+| Prefill, 128K | 5,669 | 5,726 (**+1.0%** ±1.0) | | |
+| Prefill, 256K | 5,429 | 5,496 (**+1.3%** ±0.4) | 4,123 | 4,060 (**-1.5%** ±0.4) |
+| Prefill, 512K (TP3 500K) | 4,998 | 5,074 (**+1.5%** ±0.2) | 3,797 | 3,753 (**-1.2%** ±1.0) |
+| Prefill, 1M | 4,346 | 4,391 (**+1.0%** ±0.3) | | |
 
-Real-row cost profiles of both releases put r6f's steps 1-5% above r6d's at
-a fixed batch size; what r6f adds to a decode step is mostly the
-reference-precision arithmetic, which costs more on three nodes, where each
-rank holds a third of the vocabulary and experts. The pieces that leave the
-bits unchanged pay for it on prefill: the sequence-parallel WO overlap (+2% at
-16K) and fused sum (about +1%), and the shared expert folded into the MoE
-combine (about +1%). The new TileLang kernels are each faster per call than
-what they replaced but a small share of a decode step. On four nodes prefill
-is faster at every size and decode is level, or 1.8% behind at sixteen
-streams. The bench's concurrent decode points send one prompt to
-every stream, so they follow the text, which a precision change alters; the
-release comparison judges throughput on different prompts at once and on the
-paired sweep. The r6f arms mounted r6f's sources on the r6d image; the
-promoted image builds the same vLLM tree and reproduces their temperature-0
-references.
+On four nodes r6h is at or above r6d on every metric: faster on prefill at
+every size, at eight concurrent prompts and on the paired sweep, level
+elsewhere (the mixed-traffic p95 stream gap read +3.9%, a single run without an
+interval). On three nodes it trails at eight prompts and on long prefill, by
+about 1.5%: each rank holds a third of the vocabulary and experts, so the
+reference-precision arithmetic costs more, and the head fix applies only past
+64 rows, which three nodes never reach. The bench's concurrent decode points send
+one prompt to every stream and follow the text, which a precision change
+alters (code at one stream read +21%, prose -5%); the release comparison
+judges throughput on different prompts at once and on the paired sweep.
 
 The r6 acceptance benchmark (2026-10-05, `bin/spark bench` from dgx1:
 quality, then prose and code prompts with reasoning on, temperature 0, 256

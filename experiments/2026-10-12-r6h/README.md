@@ -111,3 +111,44 @@ Next week's TP3 leads: the precision pieces cost more per rank on three nodes (a
 of the vocabulary and experts each): the mHC projection (three TF32 GEMMs), MoE one
 rounding on 768-3072-row prefill chunks, the finalize launch per mHC sublayer, and TP3's
 own fixed-row profile, which this release did not take.
+
+### TP4 results (2026-10-12, from 07:48 UTC, the ring)
+
+After a 30-minute cool-down at the maximum fan floor; candidate first: r6h / r6d / r6h
+again. `release_table.py r6h-release-tp4 r6d r6h`; every bench started below 55 °C,
+under the fan performance curve, without thermal slowdown.
+
+| metric | r6d | r6h | change |
+| --- | ---: | ---: | --- |
+| temperature 0, fifteen streams + long prompt | 13 of 16 differing | **0** (r6f's references) | |
+| quality | 5/5 | 5/5 | |
+| paired sweep, 1 stream (16 prompts) | | | **+2.6%** ±2.5% |
+| 4 different prompts at once, tok/s | 134.0 | 136.5 | +1.9% ±2.1% |
+| 8 different prompts at once | 178.5 | 184.7 | **+3.5%** ±1.5% |
+| 16 different prompts at once | 224.1 | 226.5 | +1.1% ±1.5% |
+| prefill 32K, tok/s | 5,781 | 5,870 | **+1.5%** ±0.8% |
+| prefill 128K | 5,669 | 5,726 | **+1.0%** ±1.0% |
+| prefill 256K | 5,429 | 5,496 | **+1.3%** ±0.4% |
+| prefill 512K | 4,998 | 5,074 | **+1.5%** ±0.2% |
+| prefill 1M | 4,346 | 4,391 | **+1.0%** ±0.3% |
+| mixed traffic, p95 stream gap (one run, no interval) | 86.6 ms | 90.0 ms | +3.9% |
+
+r6h is at or above r6d on every metric with an interval on four nodes; sixteen prompts
+moved from r6g's -0.9% to level. The bench's one-prompt points follow the text (code c1
++21.1% with acceptance 1.75 to 2.37, prose c1 -4.7%).
+
+## Promotion (2026-10-12)
+
+Owner: promote unless there is a technical regression; r6h is better than r6f and the
+TP3 shortfall moves to next week's release.
+
+- Profiles: `config/cluster-tp4.json` and the three TP3 profiles run the `-r6h` image
+  with its own cost curves (`ring4-r6h-20261012`, `tp3-r6h-20261012`).
+- Root lock: this series, source manifest
+  [manifests/sources/2026-10-12-r6h-source.json](../../manifests/sources/2026-10-12-r6h-source.json).
+- Baseline: [2026-10-12-karmic-kraken-r6h](../../manifests/baselines/2026-10-12-karmic-kraken-r6h.json).
+- Benchmark references: the comparisons' r6h arms,
+  [TP4](../../manifests/benchmarks/2026-10-12-karmic-kraken-r6h-tp4.json) (full) and
+  [TP3](../../manifests/benchmarks/2026-10-12-karmic-kraken-r6h.json) (quality and prefill).
+- Deployed through the TP4 window's close: a sync job moves the checkouts to this
+  promotion, so the window's production restore boots r6h.
