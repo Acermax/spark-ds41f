@@ -82,7 +82,8 @@ for mode in MODES:
         base = outs[NAMES[0]]
         for name in NAMES[1:]:
             for i in range(SETS):
-                for key in ("r_out", "p", "s", "c", "q"):
+                # "pre" reads streams already updated and writes no R_out.
+                for key in (("p", "s", "c", "q") if mode == "pre" else ("r_out", "p", "s", "c", "q")):
                     if not torch.equal(outs[name][i][key].view(torch.uint8), base[i][key].view(torch.uint8)):
                         failures += 1
                         print(f"MISMATCH {name} {mode} rows={rows} set={i} {key}")
