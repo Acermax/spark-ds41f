@@ -32,3 +32,21 @@ Adds the register-prefetch variant (`mhc_pipe.py`): stream 0's fn tile is reques
 registers before the token's inputs load, each later stream's before the previous
 stream's GEMMs, and each tile is split from registers into the three shared tiles: the
 fn loads overlap the GEMMs, with the same values and GEMM order.
+
+### Window 2 results (2026-10-12, 02:50 UTC)
+
+All three variants bit-identical on every output, both modes, 1-96 rows (the kernel-lab
+verdict reads FAIL with exit 0: the harness wants a pytest summary from a script
+bundle). `post_pre`, µs a call, base / fused / prefetch:
+
+| rows | cold fn | warm fn |
+| --- | --- | --- |
+| 32 | 30.0 / 28.8 / 28.9 | 13.0 / 11.5 / 11.8 |
+| 64 | 46.3 / 44.9 / 45.5 | 24.9 / 20.9 / 21.5 |
+| 96 | 61.1 / 59.2 / 60.2 | 32.5 / 27.5 / 28.5 |
+
+Register prefetch adds nothing over the fused split: with fn cold the call is
+memory-bound. The fused split saves 2-5 µs a call at 64-96 rows (serving sits between
+cold and warm, about 43 µs at 96 rows), about 0.2-0.4 ms a step: vLLM branch
+`r6h-mhc-fused-split` (on r6g-fold-overlap). The rest of the precision cost is the
+three GEMMs and the extra shared tiles, which a bit-identical kernel keeps.
