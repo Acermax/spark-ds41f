@@ -69,3 +69,26 @@ cost curves), r6h, head out with its own curves (real rows, empty
 of eight different prompts. Then a fixed-row profile of the head-out arm (code16): the
 two-tile head should read near the bench's 1.65-1.73 ms. TP3 never has two tiles, so
 this changes nothing there.
+
+### Window 2 results (2026-10-12, 18:51-19:24 UTC)
+
+Every arm identical at temperature 0 with r6f's references. Different prompts at once,
+six samples, tok/s:
+
+| arm | sixteen | eight |
+| --- | ---: | ---: |
+| head out (r6h's curves) | 224.1 | 181.3 |
+| r6h | 223.0 | 180.9 |
+| head out, its own curves | **226.3** | 180.2 |
+| head out again | 224.7 | 181.1 |
+
+The two-tile head reads 1.73 ms a call in regular memory against 2.22 in the carve-out
+(every rank), as the bench predicted: 0.95 ms less head time a 96-row step. The step does
+not shrink by that much (profiled span -0.2%): the one-shot all-reduce, which spins until
+the slowest rank arrives, takes 0.43 ms more, so at sixteen streams the head is not what
+bounds the step. With curves profiled for it, adaptive verification spends the cheaper
+two-tile call on more drafts: +1.0% ±1.0 against head out on r6h's curves, about +1.5%
+against r6h. Eight prompts (one tile) is level. TP3 never has two tiles.
+
+The 128-row tile in TODO.md shares this ceiling: at sixteen streams the time a faster
+head saves becomes all-reduce wait unless the step's skew is addressed too.
