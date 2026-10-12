@@ -15,9 +15,14 @@ NAMES = sys.argv[1:] or ["vocab_base", "vocab_swap"]
 ROWS = (16, 48, 64, 65, 80, 96, 128)
 
 
+import vllm.models.deepseek_v4_1.tilelang  # noqa: E402  (the copies' relative imports)
+
+
 def load(name):
-    spec = importlib.util.spec_from_file_location(name, f"/b/{name}.py")
+    qualified = f"vllm.models.deepseek_v4_1.tilelang.{name}"
+    spec = importlib.util.spec_from_file_location(qualified, f"/b/{name}.py")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[qualified] = module
     spec.loader.exec_module(module)
     return module
 
