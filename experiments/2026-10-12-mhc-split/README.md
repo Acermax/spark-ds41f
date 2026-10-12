@@ -17,3 +17,18 @@ keeps its bits.
 [bundles/project](bundles/project): both variants of `project_streams`
 (`post_pre` and `pre`) at 1-96 rows, fn cold (40 distinct sets in one graph) and warm,
 every output compared bit for bit.
+
+### Window 1 results (2026-10-12, 02:47 UTC)
+
+The fused variant kept every output's bits (the 262 reported mismatches were `R_out` in
+`pre` mode, which writes no `R_out`: two uninitialized buffers; the bench now skips it).
+`post_pre` per call, µs, base / fused: cold fn 29.9 / 27.9 at 32 rows, 47.2 / 43.3 at
+64, 62.2 / 59.2 at 96; warm 13.1 / 11.4, 24.7 / 21.2, 32.5 / 27.7. With fn cold the call
+is near memory-bound and the split's latency is not overlapped with the loads.
+
+## Window 2 ([w2.json](w2.json))
+
+Adds the register-prefetch variant (`mhc_pipe.py`): stream 0's fn tile is requested into
+registers before the token's inputs load, each later stream's before the previous
+stream's GEMMs, and each tile is split from registers into the three shared tiles: the
+fn loads overlap the GEMMs, with the same values and GEMM order.
