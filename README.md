@@ -73,15 +73,19 @@ running service.
 | 3 | [Fabric](docs/setup.md#3-fabric-cabling-and-addressing): cable, then address with `sparknet topology discover` | 9000-byte pings on every cable path |
 | 4 | [Site configuration](docs/setup.md#4-site-configuration): node map, head address, interfaces | `bin/spark doctor` |
 | 5 | [Model](docs/setup.md#5-model): the pinned checkpoint on every node | |
-| 6 | [Image](docs/setup.md#6-image): `bin/spark build prepare`, `bin/spark build image --apply`, copy to every node | one image ID everywhere |
-| 7 | [First start](docs/setup.md#7-first-start): `bin/spark cluster start --apply` | `bin/spark doctor --live` |
+| 6 | [Image](docs/setup.md#6-image): `bin/spark build prepare`, `bin/spark --cluster-config config/cluster.json build image --apply`, copy to every node | one image ID everywhere |
+| 7 | [First start](docs/setup.md#7-first-start): `bin/spark --cluster-config config/cluster.json cluster start --apply` | `bin/spark doctor --live` |
 | 8 | [Verify](docs/setup.md#8-verify): `bin/spark bench` | quality 5/5, no regressions |
 
-Use `--cluster-config <profile>` before the subcommand for any profile other
-than `config/cluster.json`. The repository never changes a host by itself:
+Read-only commands default to `config/cluster.json`; every command that takes
+`--apply` refuses to act until the profile is named with `--cluster-config <profile>`
+before the subcommand, so no node operation runs on a profile by accident. The
+repository never changes a host by itself:
 `bin/spark doctor` only reports, and prints each fix as a command for you to
 run ([docs/doctor.md](docs/doctor.md)). `cluster start` refuses to launch
-until the profile's kernel, fabric and image checks pass.
+until the profile's kernel, fabric, cabling and image checks pass, and refuses
+to change the running engine's shape (nodes, tensor parallelism, context, KV)
+unless told to ([launch preflight](docs/doctor.md#launch-preflight)).
 
 ## Current baseline
 
@@ -355,9 +359,9 @@ bin/spark doctor
 bin/spark doctor --live
 bin/spark status
 bin/spark render dgx1
-bin/spark cluster sync
-bin/spark cluster start --replace
-bin/spark cluster stop
+bin/spark --cluster-config config/cluster.json cluster sync
+bin/spark --cluster-config config/cluster.json cluster start --replace
+bin/spark --cluster-config config/cluster.json cluster stop
 bin/spark bench
 bin/spark upstream list
 bin/spark upstream prepare vllm
@@ -365,7 +369,7 @@ bin/spark upstream prepare b12x
 bin/spark build prepare
 bin/spark build check
 bin/spark build image
-bin/spark build image --apply
+bin/spark --cluster-config config/cluster.json build image --apply
 bin/spark build smoke
 scripts/host-recovery check
 scripts/host-recovery apply

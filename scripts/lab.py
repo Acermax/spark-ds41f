@@ -136,7 +136,7 @@ PROFILES["release-tp3"] = {
                    for a in PROFILES["release"]["bench_args"]],
     "extras": [extra for extra in PROFILES["release"]["extras"] if extra[2] != "c16-distinct"],
 }
-BENCH_BASE = ["--allow-mismatch", "--compare", "none", "--suites", "decode,prefill",
+BENCH_BASE = ["--compare", "none", "--suites", "decode,prefill",
               "--decode-cases", "prose,json-nothink", "--concurrency", "1", "--prefill-text", "source"]
 # Validation tiers: scenario sets for boot A and the restart (None = every scenario).
 TIERS = {
@@ -335,8 +335,9 @@ def boot(config: str, dry: bool = False) -> bool:
         return False
     log(f"start {config}")
     started, lines = time.time(), []
-    ok = spark_cli("--cluster-config", config, "cluster", "start", "--replace", "--apply", dry=dry,
-                    capture=lines) == 0
+    # Arms may change context or KV size; the node map is already pinned to production's above.
+    ok = spark_cli("--cluster-config", config, "cluster", "start", "--replace", "--change-shape", "--apply",
+                   dry=dry, capture=lines) == 0
     if not dry:
         log(f"boot {Path(config).name}: ready +{ready_seconds(lines)} s, command {time.time() - started:.0f} s"
             f"{'' if ok else ' FAILED'}")
@@ -1164,7 +1165,12 @@ def execute(spec: dict, dry: bool, keep_open: bool, close_on_failure: bool = Tru
                     failed = f"boot of {step['config']} failed"
                     break
             elif step["kind"] == "cli":
-                log(f"bench {step['label']} exit {spark_cli(*step['argv'])}")
+                # A bench refuses a cluster that differs from its arm; that ends the job.
+                code = spark_cli(*step["argv"])
+                log(f"bench {step['label']} exit {code}")
+                if code:
+                    failed = f"bench {step['label']} exited {code}"
+                    break
             elif step["kind"] == "script":
                 log(f"{Path(step['argv'][0]).name} {step.get('label', '')} exit {run_script(step)}")
             elif step["kind"] == "sync":

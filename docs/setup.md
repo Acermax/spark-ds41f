@@ -51,7 +51,7 @@ Each node needs:
 | [64 KiB kernel, swap and memory policy](#2-kernel-64-kib-profiles) | — | required | `doctor --live`, launch | [boot the 4 KiB kernel](#revert-the-64-kib-kernel) |
 | [Memory saver](#2-kernel-64-kib-profiles) (signed DKMS UVM module) | — | required | `doctor --live`, launch | its [removal guide](https://github.com/christopherowen/dgx-spark-memory-saver/blob/main/docs/dkms.md#remove-and-restore-stock-uvm) |
 | [ConnectX-7 addressing](#3-fabric-cabling-and-addressing) (netplan) | required | required | `doctor --live`, launch | remove `40-cx7.yaml` |
-| Docker image and container | required | required | `doctor --live` | `bin/spark cluster stop --apply`, `docker image rm` |
+| Docker image and container | required | required | `doctor --live` | `bin/spark --cluster-config <profile> cluster stop --apply`, `docker image rm` |
 
 The repository changes nothing on the hosts by itself. Each change is a
 command you run, and `doctor` only reports and prints fixes ([doctor.md](doctor.md)).
@@ -390,7 +390,7 @@ Two files describe your site and stay out of git:
   inside it, an outgoing connection can take the port and the head fails to
   start.
 
-`bin/spark cluster sync --apply` moves every node's checkout to the head's
+`bin/spark --cluster-config <profile> cluster sync --apply` moves every node's checkout to the head's
 commit and copies the head's node map to the others.
 
 For any profile other than `config/cluster.json`, put `--cluster-config` before
@@ -417,7 +417,7 @@ On one idle node (the build host), from a clean checkout of `main`:
 
 ```sh
 bin/spark build prepare
-bin/spark build image --apply
+bin/spark --cluster-config config/cluster.json build image --apply
 ```
 
 `build prepare` fetches the pinned vLLM, B12X, NCCL, TileLang, TileKernels
@@ -459,13 +459,14 @@ experiments/2026-09-23-canonical-minimal/prebuild_flashinfer.sh \
 Then, from the head node, with a clean checkout of a published commit:
 
 ```sh
-bin/spark cluster sync --apply
-bin/spark cluster start --apply
-bin/spark doctor --live
+bin/spark --cluster-config config/cluster.json cluster sync --apply
+bin/spark --cluster-config config/cluster.json cluster start --apply
+bin/spark --cluster-config config/cluster.json doctor --live
 ```
 
-For TP4, give each of these `--cluster-config config/cluster-tp4.json` before
-the subcommand; `sync` then reaches the fourth node too.
+For TP4, name `config/cluster-tp4.json` instead; `sync` then reaches the fourth
+node too. Every `--apply` needs the profile named: there is no default for a
+command that changes the nodes.
 
 `cluster start` runs the [launch preflight](doctor.md#launch-preflight),
 arms a 5 GiB startup memory guard on every node, starts the ranks, waits for
@@ -477,8 +478,10 @@ The API is OpenAI-compatible on the head node's port 8000, model
 `deepseek-v4.1-flash`. Reasoning is on by default; pass
 `"chat_template_kwargs": {"thinking": false}` to turn it off per request.
 
-Stop: `bin/spark cluster stop --apply`. It stops the exact containers and
-their memory guards and keeps the containers for inspection.
+Stop: `bin/spark --cluster-config <profile> cluster stop --apply`, with the
+profile the engine was started from (the plan names it). It stops the exact
+containers and their memory guards and keeps the containers for inspection. It
+refuses a profile that covers only some of the running engine's nodes.
 
 ## 8. Verify
 

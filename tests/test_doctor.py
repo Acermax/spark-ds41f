@@ -655,7 +655,7 @@ class SiteNodesTest(unittest.TestCase):
         example = spark.json.loads((ROOT / "config" / "nodes.example.json").read_text())
         self.assertEqual(sum(node["head"] for node in example["nodes"]), 1)
         for node in example["nodes"]:
-            self.assertEqual(set(node), {"name", "rank", "management_ip", "head", "roce_peer_hcas"})
+            self.assertEqual(set(node), {"name", "rank", "management_ip", "head", "roce_peer_hcas", "roce_subnets"})
 
 
 class CoolingTest(unittest.TestCase):
@@ -782,7 +782,7 @@ class ClusterReplaceTest(unittest.TestCase):
             {"name": "dgx1", "head": True, "rank": 0, "management_ip": "1", "roce_peer_hcas": []},
             {"name": "dgx2", "head": False, "rank": 1, "management_ip": "2", "roce_peer_hcas": []},
             {"name": "dgx3", "head": False, "rank": 2, "management_ip": "3", "roce_peer_hcas": []}]}
-        cluster = {"deployment": {"launch_enabled": True}, "container": {"name": "c"}}
+        cluster = {"deployment": {"launch_enabled": True}, "container": {"name": "c", "image": "i"}}
         calls = []
         guards = set()
 
@@ -798,6 +798,8 @@ class ClusterReplaceTest(unittest.TestCase):
             mock.patch.object(spark, "configuration", return_value=(cluster, nodes, {})),
             mock.patch.object(spark, "cluster_config_path", return_value=(None, "config/cluster.json")),
             mock.patch.object(spark, "rendered_docker_command", return_value=["docker", "run"]),
+            mock.patch.object(spark, "expected_command", return_value=["--nnodes", "3"]),
+            mock.patch.object(spark, "live_engine", return_value=None),
             mock.patch.object(spark, "require_local_deployment_state", return_value="rev"),
             mock.patch.object(spark, "remote_runtime_problems", return_value=[]),
             mock.patch.object(spark, "stop_memguard",
