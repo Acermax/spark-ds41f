@@ -21,6 +21,7 @@
       "--cap-add=IPC_LOCK",
       "--ulimit=memlock=-1:-1",
       "--ulimit=stack=67108864:67108864",
+      "--ulimit=core=0",
       "--security-opt=seccomp=unconfined",
       "--security-opt=label=disable",
       "--shm-size=16g",
