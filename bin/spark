@@ -47,7 +47,7 @@ def read_json(relative: str) -> dict:
 
 
 def cluster_config_path(args: argparse.Namespace | None = None) -> tuple[Path, str]:
-    raw = getattr(args, "cluster_config", DEFAULT_CLUSTER_CONFIG)
+    raw = getattr(args, "cluster_config", None) or DEFAULT_CLUSTER_CONFIG
     relative = Path(raw)
     if relative.is_absolute():
         raise SystemExit("--cluster-config must be relative to the repository root")
@@ -1107,7 +1107,7 @@ def command_doctor(args: argparse.Namespace) -> int:
 
 
 def command_tuning(args: argparse.Namespace) -> int:
-    if args.cluster_config != DEFAULT_CLUSTER_CONFIG:
+    if args.cluster_config not in (None, DEFAULT_CLUSTER_CONFIG):
         raise SystemExit("tuning profiles select their pinned base; omit --cluster-config")
     try:
         profile, resolved = transport_profiles.resolve(ROOT, args.profiles_config, args.profile)
@@ -1359,6 +1359,19 @@ def remote_repository_state(
     return lines[0], lines[1], "\n".join(lines[2:]).strip()
 
 
+def unrecorded_subnet_problems(nodes: dict, node: dict, hcas: list[str]) -> list[str]:
+    """A multi-node start checks every RoCE interface against its cable's subnet; an
+    interface without a recorded subnet would skip that check, so it blocks the start."""
+    if len(nodes["nodes"]) < 2:
+        return []
+    missing = [hca for hca in hcas if hca not in node.get("roce_subnets", {})]
+    if not missing:
+        return []
+    return [f"{node['name']}: the node map records no cable subnet for {', '.join(missing)}, so a start "
+            "cannot check that the cabling is the one this profile was written for; add roce_subnets "
+            "(docs/switchless-topology.md)"]
+
+
 def remote_runtime_problems(
     cluster: dict,
     nodes: dict,
@@ -1428,6 +1441,7 @@ def node_runtime_problems(
     gids = remote_shell(nodes, node, roce_gid_query(hcas))
     problems.extend(roce_gid_problems(node["name"], gid_index, hcas, gids.stdout))
     problems.extend(topology.gid_subnet_problems(node, gid_index, gids.stdout))
+    problems.extend(unrecorded_subnet_problems(nodes, node, hcas))
     doctor = run_ssh(
         nodes,
         node,
@@ -1475,6 +1489,7 @@ def node_runtime_problems(
 
 
 def command_cluster_sync(args: argparse.Namespace) -> int:
+    require_named_profile(args)
     cluster, nodes, upstreams = configuration(args)
     _, config_relative = cluster_config_path(args)
     revision = repository_revision(args.revision or "HEAD")
@@ -1795,7 +1810,106 @@ def restore_containers(
             continue
 
 
+# The label naming the profile a container was started from, so a later plan can show
+# the live engine's own profile and the command that stops it.
+PROFILE_LABEL = "spark.cluster-config"
+# What "the engine's shape" means: a start that changes any of these is a different
+# deployment, not a restart.
+SHAPE_FLAGS = (("nodes", "--nnodes"), ("tp", "--tensor-parallel-size"),
+               ("context", "--max-model-len"), ("kv", "--kv-cache-memory-bytes"))
+
+
+def require_named_profile(args: argparse.Namespace) -> None:
+    """Every --apply acts on a profile named on the command line, never on the default."""
+    if getattr(args, "apply", False) and getattr(args, "cluster_config", None) is None:
+        raise SystemExit(
+            "--apply changes the nodes, so name the profile: bin/spark --cluster-config PATH ... --apply "
+            f"({DEFAULT_CLUSTER_CONFIG} is the default only for read-only commands)"
+        )
+
+
+def engine_shape(command: list[str]) -> dict[str, str | None]:
+    """Node count, tensor parallelism, context and KV bytes of a vLLM command."""
+    def value(flag: str) -> str | None:
+        return command[command.index(flag) + 1] if flag in command[:-1] else None
+
+    shape = {key: value(flag) for key, flag in SHAPE_FLAGS}
+    shape["nodes"] = shape["nodes"] or "1"
+    shape["tp"] = shape["tp"] or "1"
+    return shape
+
+
+def engine_text(shape: dict[str, str | None]) -> str:
+    context, kv = shape.get("context"), shape.get("kv")
+    context_text = f"{int(context):,}" if context and context.isdigit() else context or "default"
+    kv_text = f"{int(kv) / 2**30:.1f} GiB" if kv and kv.isdigit() else kv or "default"
+    return f"{shape['nodes']} nodes, TP{shape['tp']}, context {context_text}, KV {kv_text}"
+
+
+def head_node(nodes: dict) -> dict:
+    return next(node for node in nodes["nodes"] if node["head"])
+
+
+def live_engine(cluster: dict, nodes: dict) -> dict | None:
+    """The engine container on the profile's head node, running or stopped; None if absent.
+
+    Raises RuntimeError when the head node cannot be reached."""
+    head = head_node(nodes)
+    result = run_ssh(nodes, head, "docker", "inspect", cluster["container"]["name"])
+    if result.returncode == 255:
+        raise RuntimeError(f"cannot reach {head['name']} to inspect the live engine: {result.stderr.strip()}")
+    if result.returncode:
+        return None
+    inspection = json.loads(result.stdout)[0]
+    return {
+        "shape": engine_shape(inspection["Config"]["Cmd"] or []),
+        "image": inspection["Config"]["Image"],
+        "running": bool(inspection["State"]["Running"]),
+        "profile": (inspection["Config"].get("Labels") or {}).get(PROFILE_LABEL),
+    }
+
+
+def describe_live(live: dict | None) -> str:
+    if live is None:
+        return "no engine container on the head node"
+    state = "running" if live["running"] else "stopped"
+    return (f"{state}: {engine_text(live['shape'])}, image {live['image']}, "
+            f"started from {live['profile'] or 'an unrecorded profile'}")
+
+
+def shape_changes(live: dict | None, planned: dict[str, str | None]) -> list[str]:
+    if live is None:
+        return []
+    return [key for key, _ in SHAPE_FLAGS if live["shape"].get(key) != planned.get(key)]
+
+
+def stop_own_profile(live: dict) -> str:
+    return f"bin/spark --cluster-config {live['profile'] or 'PATH'} cluster stop --apply"
+
+
+def start_refusal(live: dict | None, planned: dict[str, str | None], change_shape: bool) -> str | None:
+    """Why --apply must not start this profile over the live engine, or None."""
+    if live is None:
+        return None
+    if live["running"] and live["shape"]["nodes"] != planned["nodes"]:
+        return (f"a {live['shape']['nodes']}-node engine is running and this profile has {planned['nodes']} "
+                "nodes; replacing it here would leave its other nodes on a broken engine. Stop it with its "
+                f"own profile first: {stop_own_profile(live)}")
+    changes = shape_changes(live, planned)
+    if changes and not change_shape:
+        return (f"this start changes the engine's {', '.join(changes)} ({engine_text(live['shape'])} -> "
+                f"{engine_text(planned)}); pass --change-shape if that is intended")
+    return None
+
+
+def launch_command(cluster: dict, node: dict, config_relative: str) -> list[str]:
+    """The rank's docker run, labelled with the profile it was started from."""
+    command = rendered_docker_command(cluster, node)
+    return [*command[:5], "--label", f"{PROFILE_LABEL}={config_relative}", *command[5:]]
+
+
 def command_cluster_start(args: argparse.Namespace) -> int:
+    require_named_profile(args)
     cluster, nodes, upstreams = configuration(args)
     _, config_relative = cluster_config_path(args)
     if args.apply and not cluster["deployment"]["launch_enabled"]:
@@ -1806,14 +1920,31 @@ def command_cluster_start(args: argparse.Namespace) -> int:
         return 1
     name = cluster["container"]["name"]
     order = deployment_order(nodes)
+    planned = engine_shape(expected_command(cluster, head_node(nodes)))
+    try:
+        live, unreachable = live_engine(cluster, nodes), None
+    except RuntimeError as error:
+        live, unreachable = None, str(error)
+    changes = shape_changes(live, planned)
+    print(f"profile: {config_relative} on {', '.join(node['name'] for node in nodes['nodes'])}")
+    print(f"live:    {unreachable or describe_live(live)}")
+    print(f"plan:    {engine_text(planned)}, image {cluster['container']['image']}")
+    print("shape:   " + (f"CHANGES {', '.join(changes)}" if changes else "new engine" if live is None else "unchanged"))
     print("start plan (fail-closed startup memory guards):")
     for node in order:
-        print(f"  {node['name']}: pre-arm startup memguard")
-        print(f"  {node['name']}: {shlex.join(rendered_docker_command(cluster, node))}")
+        print(f"  {node['name']}: pre-arm startup memguard, launch rank {node['rank']}")
+        if getattr(args, "verbose", False):
+            print(f"    {shlex.join(launch_command(cluster, node, config_relative))}")
     print("  wait for API/JIT readiness, then switch every node to steady memguard")
+    refusal = unreachable or start_refusal(live, planned, getattr(args, "change_shape", False))
     if not args.apply:
-        print("plan only; pass --apply to start the cluster")
+        if refusal:
+            print(f"--apply would refuse: {refusal}")
+        print("plan only; pass --apply to start the cluster (--verbose prints each docker command)")
         return 0
+    if refusal:
+        print(f"ERROR: {refusal}", file=sys.stderr)
+        return 1
 
     revision = require_local_deployment_state(cluster, nodes, upstreams)
     problems = remote_runtime_problems(
@@ -1885,7 +2016,7 @@ def command_cluster_start(args: argparse.Namespace) -> int:
                     f"{node['name']}: pre-armed startup memguard is not active; "
                     "refusing launch"
                 )
-            result = run_ssh(nodes, node, *rendered_docker_command(cluster, node))
+            result = run_ssh(nodes, node, *launch_command(cluster, node, config_relative))
             if result.returncode:
                 detail = result.stderr.strip() or result.stdout.strip()
                 raise RuntimeError(f"{node['name']}: launch failed: {detail}")
@@ -1931,14 +2062,32 @@ def command_cluster_start(args: argparse.Namespace) -> int:
 
 
 def command_cluster_stop(args: argparse.Namespace) -> int:
+    require_named_profile(args)
     cluster, nodes, _ = configuration(args)
     name = cluster["container"]["name"]
     action = "stop and remove" if args.remove else "stop"
+    covered = engine_shape(expected_command(cluster, head_node(nodes)))["nodes"]
+    refusal = None
+    try:
+        live = live_engine(cluster, nodes)
+        print(f"live: {describe_live(live)}")
+        if live and live["running"] and live["shape"]["nodes"] != covered:
+            refusal = (f"the running engine spans {live['shape']['nodes']} nodes and this profile covers "
+                       f"{covered}; stopping only these would leave the rest on a broken engine. Stop it with "
+                       f"its own profile: {stop_own_profile(live)}")
+    except RuntimeError as error:
+        # Stopping is the safe direction: an unreachable head does not block it.
+        print(f"WARN: {error}")
     for node in nodes["nodes"]:
         print(f"{node['name']}: {action} exact container {name} and stop its memguard")
     if not args.apply:
+        if refusal:
+            print(f"--apply would refuse: {refusal}")
         print("plan only; pass --apply to stop the cluster")
         return 0
+    if refusal:
+        print(f"ERROR: {refusal}", file=sys.stderr)
+        return 1
 
     def stop_node(node: dict) -> tuple[list[str], list[str]]:
         """Stop one node's memguard and container; return (messages, errors)."""
@@ -2693,6 +2842,7 @@ def smoke_image(cluster: dict, tag: str, script: str = SMOKE_SCRIPT) -> None:
 
 
 def command_build_image(args: argparse.Namespace) -> int:
+    require_named_profile(args)
     cluster, _, upstreams = configuration(args)
     inputs = build_inputs(upstreams)
     directory = build_directory(inputs)
@@ -5249,9 +5399,10 @@ def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="spark")
     root.add_argument(
         "--cluster-config",
-        default=DEFAULT_CLUSTER_CONFIG,
+        default=None,
         metavar="PATH",
-        help="repository-relative cluster config (default: config/cluster.json)",
+        help="repository-relative cluster config (default for read-only commands: config/cluster.json; "
+        "every --apply needs it named)",
     )
     commands = root.add_subparsers(dest="command", required=True)
     doctor = commands.add_parser("doctor", help="validate repository and optional live state")
@@ -5304,6 +5455,13 @@ def parser() -> argparse.ArgumentParser:
     )
     cluster_start.add_argument(
         "--apply", action="store_true", help="perform the planned coordinated start"
+    )
+    cluster_start.add_argument(
+        "--change-shape", action="store_true",
+        help="allow a start that changes the engine's node count, tensor parallelism, context or KV size",
+    )
+    cluster_start.add_argument(
+        "--verbose", action="store_true", help="print each rank's docker command in the plan"
     )
     cluster_start.set_defaults(func=command_cluster_start)
     cluster_stop = cluster_commands.add_parser(

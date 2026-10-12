@@ -276,7 +276,7 @@ class ProductionProfileTest(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()) as out:
             self.assertTrue(lab.boot("experiments/x/cluster-tp4-candidate.json", dry=True))
             self.assertFalse(lab.boot("config/cluster.json", dry=True))
-        self.assertIn("--cluster-config experiments/x/cluster-tp4-candidate.json cluster start --replace --apply",
+        self.assertIn("--cluster-config experiments/x/cluster-tp4-candidate.json cluster start --replace --change-shape --apply",
                       out.getvalue())
         self.assertIn("lab windows require the promoted node topology (config/cluster-tp4.json)", out.getvalue())
         self.assertEqual(out.getvalue().count("cluster start"), 1)
@@ -297,7 +297,7 @@ class ProductionProfileTest(unittest.TestCase):
         self.hold(TP4)
         code, out = self.main("window", "close", "--dry-run")
         self.assertEqual(code, 0)
-        self.assertIn("--cluster-config config/cluster-tp4.json cluster start --replace --apply", out)
+        self.assertIn("--cluster-config config/cluster-tp4.json cluster start --replace --change-shape --apply", out)
         self.assertTrue(lab.HOLD.exists())
         with self.assertRaises(SystemExit):
             self.main("window", "close", "--dry-run", "--production-config", "config/cluster.json")
@@ -349,7 +349,7 @@ class ProductionProfileTest(unittest.TestCase):
                 mock.patch.object(lab.subprocess, "Popen", side_effect=no_subprocesses):
             code, out = self.main("watchdog", "--once")
         self.assertEqual(code, 0)
-        self.assertEqual(cli.call_args.args, ("--cluster-config", TP4, "cluster", "start", "--replace", "--apply"))
+        self.assertEqual(cli.call_args.args, ("--cluster-config", TP4, "cluster", "start", "--replace", "--change-shape", "--apply"))
         self.assertFalse(lab.HOLD.exists())
         self.assertIn("window closed; hold removed", out)
 
@@ -686,6 +686,33 @@ class StepFailureTest(unittest.TestCase):
         self.assertEqual(code, 1)
         close.assert_called_once()
         self.assertIn("raised RuntimeError: cannot read dgx3", close.call_args.args[0])
+
+
+    def test_a_failing_bench_ends_the_job_before_its_scripts(self) -> None:
+        spec = {"experiment": "experiments/x", "run": "t1",
+                "jobs": [{"kind": "measure", "profile": "lean", "arms": [{"config": "a.json", "label": "a"}]}]}
+        with mock.patch.object(lab, "read_hold", return_value={"holder": "test"}), \
+                mock.patch.object(lab, "hold_is_ours", return_value=True), \
+                mock.patch.object(lab, "window_should_close", return_value=None), \
+                mock.patch.object(lab, "beat"), \
+                mock.patch.object(lab, "fence_problems", return_value=[]), \
+                mock.patch.object(lab, "overlay_manifest", return_value=[]), \
+                mock.patch.object(lab, "boot", return_value=True), \
+                mock.patch.object(lab, "save_curves"), \
+                mock.patch.object(lab, "spark_cli", return_value=1), \
+                mock.patch.object(lab, "run_script") as script, \
+                mock.patch.object(lab.Path, "read_text", return_value='{"container": {"mounts": [], "image": "i"}}'), \
+                mock.patch.object(lab, "production_configuration", return_value=(
+                    {"host": {"home": "/h"}}, {"nodes": [{"name": "dgx1", "head": True, "management_ip": "1"}]}, {})), \
+                mock.patch.object(lab, "window_close", return_value=True) as close, \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            code = lab.execute(spec, dry=False, keep_open=True)
+        self.assertEqual(code, 1)
+        script.assert_not_called()
+        self.assertIn("bench a exited 1", close.call_args.args[0])
+
+    def test_the_lean_bench_does_not_override_its_live_check(self) -> None:
+        self.assertNotIn("--allow-mismatch", lab.BENCH_BASE)
 
 
 class FabricTest(unittest.TestCase):

@@ -137,20 +137,35 @@ fragmented file; run them with the service stopped.
 
 ## Launch preflight
 
-`bin/spark cluster start --apply` repeats the checks a start cannot survive,
-on every node, and refuses to launch on any failure:
+`bin/spark --cluster-config <profile> cluster start --apply` repeats the checks
+a start cannot survive, on every node, and refuses to launch on any failure:
 
+- the profile is named on the command line (every `--apply` refuses the
+  read-only default);
+- the engine on the head node, running or stopped, has the profile's shape:
+  node count, tensor parallelism, context (`--max-model-len`) and KV size
+  (`--kv-cache-memory-bytes`). A start that changes any of them needs
+  `--change-shape`. A running engine on a different number of nodes is refused
+  even then: stop it with its own profile first;
 - the configuration has `deployment.launch_enabled: true`;
 - local `doctor` is clean and the local checkout has no uncommitted files;
 - each node's checkout is at the same commit, clean, and its `origin` is the
   deployment repository;
 - the profile's kernel requirements (above);
-- the RDMA devices, GID index and cable subnets (above);
+- the RDMA devices, GID index and cable subnets (above). On more than one node,
+  every RoCE interface the profile uses needs its `roce_subnets` entry: without
+  it the start could not tell a triangle from a ring;
 - `bin/spark doctor` passes on the node itself;
 - every mount source exists (writable for read-write mounts);
 - the image is present with the expected tree labels;
 - no container with the serving name exists unless you pass `--replace`;
 - passwordless `sudo` works (the memory guards need it).
+
+The plan, without `--apply`, opens with the live engine (state, shape, image and
+the profile it was started from), the planned engine and whether the shape
+changes, and says when `--apply` would refuse; `--verbose` adds each rank's
+`docker run`. Each container is labelled `spark.cluster-config=<profile>`, so the
+next plan can name the profile that stops it.
 
 Then it arms a 5 GiB startup memory guard on every node before any container
 starts, starts the ranks, waits for the API, and switches to the 3 GiB steady

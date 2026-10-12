@@ -77,8 +77,12 @@ ssh dgx1 'cd ~/projects/spark-ds41f && setsid -f scripts/lab.py run SPEC.json \
 A spec names the experiment directory, a run name and a list of jobs. A run opens a
 window if none of ours is open.
 
-- **`measure`:** boots each arm with `cluster start --replace`, with no stop in
-  between, and measures it.
+- **`measure`:** boots each arm with `cluster start --replace --change-shape`, with no
+  stop in between, and measures it. The arm's node map must equal production's (below),
+  so an arm can change context or KV size but never the node set.
+  - The bench checks the live engine against the arm before it measures. A bench that
+    exits non-zero (a cluster that differs from the arm, a failed quality gate, failed
+    requests, an aborted run) ends the job before its scripts run.
   - Profile `lean`, about 2.5 min per arm:
     - bench prose and JSON with 3 samples each;
     - 1K and 16K prefill, 2 repeats each;

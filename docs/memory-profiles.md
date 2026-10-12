@@ -38,7 +38,7 @@ both its named file and `cluster.json` together.
 ## Install memory-saver
 
 Reserve the cluster through `scripts/lab.py window open`, then stop all ranks
-with `bin/spark cluster stop --remove --apply --parallel`. From the same clean,
+with `bin/spark --cluster-config <profile> cluster stop --remove --apply --parallel`. From the same clean,
 published deployment checkout on each node, run:
 
 ```sh

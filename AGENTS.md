@@ -56,7 +56,9 @@ for three-node direct-peer and four-node neighbour-ring profiles. A new topology
 needs its own hardware qualification before promotion.
 
 Use `bin/spark cluster sync`, `start`, and `stop` for node operations. They are
-plans unless `--apply` is supplied. Never deploy with rsync or copy a dirty
+plans unless `--apply` is supplied, and every `--apply` needs `--cluster-config`
+named: read the plan's `live:` and `shape:` lines first. Never pass
+`--change-shape` to get past a refusal unless the shape change is the intent. Never deploy with rsync or copy a dirty
 working tree: publish one commit, require clean node checkouts, and detach every
 node at that exact commit. Do not bypass the coordinated start with a one-rank
 launch script.
