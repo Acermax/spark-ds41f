@@ -1,0 +1,28 @@
+{
+  "experiment": "experiments/2026-10-12-r6g-release",
+  "run": "r6g-release-tp4",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "measure",
+      "profile": "release",
+      "bracket": false,
+      "arms": [
+        {
+          "config": "experiments/2026-10-10-r6d-deterministic/r6d-tp4.json",
+          "label": "r6d"
+        },
+        {
+          "config": "experiments/2026-10-12-r6g/r6g-tp4.json",
+          "label": "r6g"
+        },
+        {
+          "config": "experiments/2026-10-10-r6d-deterministic/r6d-tp4.json",
+          "label": "r6d-again"
+        }
+      ]
+    }
+  ]
+}
