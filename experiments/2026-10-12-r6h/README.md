@@ -137,6 +137,13 @@ r6h is at or above r6d on every metric with an interval on four nodes; sixteen p
 moved from r6g's -0.9% to level. The bench's one-prompt points follow the text (code c1
 +21.1% with acceptance 1.75 to 2.37, prose c1 -4.7%).
 
+**Drift arm** (r6h again, last, 09:01-09:40 UTC): identical at temperature 0 with the same
+references, quality 5/5. Against the first r6h arm, decode read 0.6-1.4% lower (paired
++1.9%, 4/8/16 prompts +1.3/+2.1/+0.3% against r6d) and prefill 0.3-0.4% higher (+1.2% to
++1.9% against r6d), every difference inside its interval. The repeat still ranks level with
+or ahead of r6d on every metric with an interval. Mixed traffic's one-run p95 stream gap read
+93.1 ms (r6d 86.6, first r6h 90.0).
+
 ## Promotion (2026-10-12)
 
 Owner: promote unless there is a technical regression; r6h is better than r6f and the
