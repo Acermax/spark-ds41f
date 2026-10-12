@@ -43,3 +43,31 @@ vLLM branch `r6h-mhc-fused-split` (on r6g's `fbaa04151`):
 [bundles/kernels](bundles/kernels) runs the mHC, MoE and vocabulary head tests with the
 three files (dgx1); [bundles/head](bundles/head) times the head per call with both grids
 and compares the outputs bit for bit (dgx2).
+
+### Window 1 results (2026-10-12, 05:20-05:45 UTC)
+
+| arm | sixteen prompts, tok/s | eight prompts |
+| --- | ---: | ---: |
+| base (r6g) | 220.1 ±1.5% | 178.4 ±0.4% |
+| head out of the carve-out | 220.3 ±1.3% | 178.5 ±0.4% |
+| curves profiled for the image | **223.5** ±0.9% | **180.3** ±0.4% |
+| base again | 220.2 ±1.4% | 178.4 ±0.4% |
+
+The carve-out streams at full speed: no change. Curves profiled for the image add 1.5%
+and 1.1% (adaptive verification had sized r6g's steps from r6's cost shape).
+
+### Window 2 and 3 results (05:45-05:48 UTC)
+
+The mHC, MoE and vocabulary head tests pass with the three changes (82 passed). The
+head bench, bit-identical: one tile (up to 64 rows) unchanged at 1.10-1.24 ms a call;
+two tiles 2.29-2.38 ms with vocabulary blocks fastest, 1.60-1.89 ms with token tiles
+fastest (80 rows: 2.34 to 1.65 ms; the drafter's call at sixteen streams).
+
+## r6h
+
+r6g's series and vLLM `r6h-mhc-fused-split` (0115-0117): patch head `e39cd9da9938`,
+tree `68c9abd9c1d7` (replayed as build prepare does). [r6h-tp4.json](r6h-tp4.json) is
+r6g-tp4 with the `-r6h` image and its own cost curves (`ring4-r6h-20261012`, profiled
+with real rows on the image's first boot). [image.json](image.json) builds and copies it
+and gates it (determinism with and without logprobs); [release-tp4.json](release-tp4.json)
+runs the release comparison, r6d / r6h / r6d again.

@@ -40,6 +40,7 @@ TILELANG_EXPERIMENTS = (
     "experiments/2026-10-10-r6d-deterministic",
     "experiments/2026-10-11-r6f",
     "experiments/2026-10-12-r6g",
+    "experiments/2026-10-12-r6h",
 )
 FLAGS = ("--attention-backend", "--linear-backend", "--moe-backend")
 # Each TileLang profile and the B12X configuration it mirrors, with that
