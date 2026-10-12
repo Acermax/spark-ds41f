@@ -84,3 +84,30 @@ Arm order (owner, 2026-10-12): the candidate first, so heat soak does not count 
 it, and again last for drift. The TP3 comparison had already started in the old order
 (r6d first, r6h second), so its r6h numbers are conservative. The TP4 comparison runs
 r6h / r6d / r6h again.
+
+### TP3 results (2026-10-12, 06:40-07:09 UTC, the triangle)
+
+`release_table.py r6h-release-tp3 r6d r6h` (r6d ran first, r6h second, under the old
+order). Both benches started with every node at 47-51 °C (below the 55 °C cooling
+threshold), the fan performance curve active and no thermal slowdown.
+
+| metric | r6d | r6h | change |
+| --- | ---: | ---: | --- |
+| temperature 0, every scenario | mixed15 1 differing | **identical** | |
+| quality | 5/5 | 5/5 | |
+| paired sweep, 1 stream (16 prompts) | | | -1.0% ±2.3% |
+| 4 different prompts at once, tok/s | 107.5 | 107.1 | -0.4% ±1.1% (r6f: -3.1%) |
+| 8 different prompts at once | 137.2 | 134.9 | **-1.6% ±0.6%** |
+| prefill 32K, tok/s | 4,304 | 4,252 | -1.2% ±1.5% |
+| prefill 256K | 4,123 | 4,060 | **-1.5% ±0.4%** |
+| prefill 500K | 3,797 | 3,753 | **-1.2% ±1.0%** |
+
+r6h is identical at temperature 0 and closes r6f's four-prompt gap. It still trails r6d
+on TP3 at eight prompts and on long prefill, about 1.5%. r6h is r6f plus bit-identical
+work, so it is not behind r6f; the owner promotes it as a meaningful improvement and
+moves the TP3 shortfall to next week's release.
+
+Next week's TP3 leads: the precision pieces cost more per rank on three nodes (a third
+of the vocabulary and experts each): the mHC projection (three TF32 GEMMs), MoE one
+rounding on 768-3072-row prefill chunks, the finalize launch per mHC sublayer, and TP3's
+own fixed-row profile, which this release did not take.
