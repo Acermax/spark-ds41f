@@ -1,0 +1,9 @@
+{
+  "description": "mHC project_streams: r6g's kernel against the fused load-and-split variant, per call cold and warm, every output bit for bit.",
+  "image": "vllm-ds41f-kkref:19f2c20ed4d6-r6g",
+  "env": {"HF_HUB_OFFLINE": "1"},
+  "workdir": "/opt/spark3/candidate/vllm",
+  "argv": ["/b/bench_project.py", "mhc_base", "mhc_fused"],
+  "verdict": "exit",
+  "mounts": [["mhc_base.py", "/b/mhc_base.py"], ["mhc_fused.py", "/b/mhc_fused.py"], ["bench_project.py", "/b/bench_project.py"]]
+}

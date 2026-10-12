@@ -1,0 +1,8 @@
+{
+  "experiment": "experiments/2026-10-12-mhc-split",
+  "run": "mhc-split-w1",
+  "jobs": [
+    {"kind": "sync"},
+    {"kind": "kernel", "bundles": [{"node": "dgx1", "bundle": "experiments/2026-10-12-mhc-split/bundles/project"}]}
+  ]
+}
