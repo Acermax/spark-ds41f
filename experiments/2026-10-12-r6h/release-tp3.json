@@ -1,0 +1,80 @@
+{
+  "experiment": "experiments/2026-10-12-r6h",
+  "run": "r6h-release-tp3",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "measure",
+      "bracket": false,
+      "bench_args": [
+        "--suites",
+        "quality,prefill",
+        "--prefill-text",
+        "source",
+        "--prefill-sizes",
+        "32768,262144,500000",
+        "--prefill-repeats",
+        "2",
+        "--compare",
+        "none"
+      ],
+      "extras": [
+        [
+          "experiments/2026-10-09-tilelang-migration/token_determinism.py",
+          [
+            "--tokens",
+            "192",
+            "--long-lines",
+            "700",
+            "--wide"
+          ],
+          "determinism"
+        ],
+        [
+          "scripts/acceptance_sweep.py",
+          [
+            "--tokens",
+            "256"
+          ],
+          "sweep"
+        ],
+        [
+          "scripts/distinct_streams.py",
+          [
+            "--streams",
+            "4",
+            "--samples",
+            "4",
+            "--tokens",
+            "256"
+          ],
+          "c4-distinct"
+        ],
+        [
+          "scripts/distinct_streams.py",
+          [
+            "--streams",
+            "8",
+            "--samples",
+            "4",
+            "--tokens",
+            "256"
+          ],
+          "c8-distinct"
+        ]
+      ],
+      "arms": [
+        {
+          "config": "experiments/2026-10-10-r6d-deterministic/r6d-tp3.json",
+          "label": "r6d"
+        },
+        {
+          "config": "experiments/2026-10-12-r6h/r6h-tp3.json",
+          "label": "r6h"
+        }
+      ]
+    }
+  ]
+}

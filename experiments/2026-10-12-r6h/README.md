@@ -71,3 +71,11 @@ r6g-tp4 with the `-r6h` image and its own cost curves (`ring4-r6h-20261012`, pro
 with real rows on the image's first boot). [image.json](image.json) builds and copies it
 and gates it (determinism with and without logprobs); [release-tp4.json](release-tp4.json)
 runs the release comparison, r6d / r6h / r6d again.
+
+## TP3 ([release-tp3.json](release-tp3.json)), trimmed for a same-morning re-cable
+
+r6d (`r6d-tp3.json`) against r6h ([r6h-tp3.json](r6h-tp3.json): the promoted TP3 profile
+with the `-r6h` image and its own cost curves, `tp3-r6h-20261012`, profiled on its first
+boot) on the triangle: quality, prefill at 32K / 256K / 500K (two repeats),
+determinism `--wide`, the paired acceptance sweep, and four and eight different prompts
+at once. The bench's one-prompt decode points and the latency extras are left out.
