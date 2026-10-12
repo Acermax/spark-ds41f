@@ -1166,7 +1166,7 @@ def collective_probe_command(cluster: dict, nodes: dict, node: dict, port: int) 
     command = ["docker", "run", "--rm", "--name=spark-collective-probe",
                "--network=host", "--gpus=all", "--memory=12g", "--memory-swap=12g",
                "--device=/dev/infiniband:/dev/infiniband:rwm", "--cap-add=IPC_LOCK",
-               "--ulimit=memlock=-1:-1", "--shm-size=256m",
+               "--ulimit=memlock=-1:-1", "--ulimit=core=0", "--shm-size=256m",
                "--entrypoint=/usr/bin/timeout"]
     for key, value in sorted(env.items()):
         command.extend(["--env", f"{key}={value}"])
@@ -2831,7 +2831,7 @@ def smoke_image(cluster: dict, tag: str, script: str = SMOKE_SCRIPT) -> None:
         )
     subprocess.run(
         [
-            "docker", "run", "--rm", "-i", "--gpus", "all",
+            "docker", "run", "--rm", "-i", "--gpus", "all", "--ulimit=core=0",
             f"--memory={SMOKE_MEMORY_GIB}g", f"--memory-swap={SMOKE_MEMORY_GIB}g",
             "--entrypoint", "/usr/bin/python3", tag, "-",
         ],

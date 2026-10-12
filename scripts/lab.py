@@ -1346,7 +1346,7 @@ def bundle_mounts(bundle: Path, candidate: dict) -> list[tuple[Path, str]]:
 def bundle_command(bundle: Path, candidate: dict, out: Path) -> list[str]:
     """docker run for one kernel-lab bundle: overlay/{vllm,b12x}/... mounted at the candidate tree."""
     image = candidate["image"]
-    command = ["docker", "run", "--rm", "--gpus", "all", "--ipc=host"]
+    command = ["docker", "run", "--rm", "--gpus", "all", "--ipc=host", "--ulimit=core=0"]
     for key, value in sorted(candidate.get("env", {}).items()):
         command += ["-e", f"{key}={value}"]
     if candidate.get("display_carveout"):
