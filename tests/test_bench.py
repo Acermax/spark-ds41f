@@ -605,8 +605,8 @@ class BenchAbortCleanupTest(unittest.TestCase):
 
 
 class ReferenceShapeTest(unittest.TestCase):
-    TP3_REFERENCE = "manifests/benchmarks/2026-10-11-karmic-kraken-r6f.json"
-    TP4_REFERENCE = "manifests/benchmarks/2026-10-11-karmic-kraken-r6f-tp4.json"
+    TP3_REFERENCE = "manifests/benchmarks/2026-10-12-karmic-kraken-r6h.json"
+    TP4_REFERENCE = "manifests/benchmarks/2026-10-12-karmic-kraken-r6h-tp4.json"
     OLD_REFERENCE = "manifests/benchmarks/2026-10-02-karmic-kraken-r5o-64k.json"
     TP4_MISMATCH = "was measured with nodes 3, transport oneshot-direct; this {} has nodes 4, transport oneshot-ring4"
     # The profiles read the site's git-ignored node maps; use the example map
