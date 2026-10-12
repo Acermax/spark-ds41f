@@ -92,3 +92,7 @@ against r6h. Eight prompts (one tile) is level. TP3 never has two tiles.
 
 The 128-row tile in TODO.md shares this ceiling: at sixteen streams the time a faster
 head saves becomes all-reduce wait unless the step's skew is addressed too.
+
+**Deployed (2026-10-12, owner):** `config/cluster-tp4.json` keeps the embedding and head in
+regular memory with the curves window 2 profiled for it (`ring4-r6h-headout-20261012`).
+Same image, same bits; TP3 profiles keep the carve-out.

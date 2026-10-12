@@ -14,9 +14,14 @@ bit-identical decode work:
 - greedy verification from vocabulary shards (no FP32 logits all-gather when
   every request in a step is greedy and none asks for logprobs);
 - the vocabulary heads' token tiles vary fastest, so a call past 64 rows reads
-  each block once;
+  each block from DRAM once. Since 2026-10-12 the TP4 profile keeps the embedding
+  and head in regular memory (`SPARK3_DISPLAY_CARVEOUT_WEIGHTS=0`): the carve-out
+  is mapped uncached, so its second token tile could not reuse L2 (2.22 ms a
+  two-tile call there, 1.73 ms in regular memory;
+  `experiments/2026-10-12-r6h-loss`);
 - the mHC fn split while loading, and the folded combine's early shared load;
-- DSpark cost curves profiled for this image (`ring4-r6h-20261012`).
+- DSpark cost curves profiled for this image and head placement
+  (`ring4-r6h-headout-20261012`).
 
 The three-node profiles below (`config/cluster.json` and the 4 KiB / 64 KiB
 variants) are promoted to r6h as well, on the same image, with their own cost
@@ -45,7 +50,7 @@ the alternative backend in the same image.
 | Page-size profiles | 64 KiB selected; 4 KiB retains 2.2 GiB KV and a 262,144-token limit |
 | Output head | exact 12-bit packed BF16 (`VLLM_DS41_PACKED_BF16_LM_HEAD=1`; B12X 0012, vLLM 0028), bit-identical to the checkpoint; FP32 logits (`VLLM_DS41_HEAD_DTYPE=float32`, the reference's `head_dtype`) |
 | Reference precision | the mHC stream projection in FP32 (three exact TF32 parts per weight), the shared expert's SwiGLU in FP32 with one rounding, MoE partials rounded once per rank; WO-A's FP8 activations are the known deviation left |
-| Display carve-out | embedding and packed output-head weights in the firmware scanout reserve, loaded there directly (vLLM 0030) (`SPARK3_DISPLAY_CARVEOUT_WEIGHTS=1`, the GPU's DRM card by PCI path, `/dev/dri/by-path/pci-000f:01:00.0-card`, as `/dev/dri/card0`); the DRM file closes after the import, so the text console keeps drawing |
+| Display carve-out | TP3 profiles (TP4 keeps both in regular memory, above): embedding and packed output-head weights in the firmware scanout reserve, loaded there directly (vLLM 0030) (`SPARK3_DISPLAY_CARVEOUT_WEIGHTS=1`, the GPU's DRM card by PCI path, `/dev/dri/by-path/pci-000f:01:00.0-card`, as `/dev/dri/card0`); the DRM file closes after the import, so the text console keeps drawing |
 | Sparse attention | TileLang sparse MLA with the MXFP4 indexer; BF16 attention (patch 0023) is available and off pending a fidelity test |
 | Image input | vision tower loaded, up to 4 images per request, no host preprocessing cache |
 | DSpark | 5 draft tokens, draft TP 3, adaptive verification (cost scale 2.0), dead verification rows below survival 0.2, block rejection; vocabulary-parallel greedy drafts over the checkpoint's BF16 drafter head (the target head's own tensor) and Markov projection; the drafter marks its padding rows for the MoE routers (vLLM 0042); cost curves profiled for this image with real rows (`tp3-r6h-20261012`); greedy verification from vocabulary shards when no request needs the logits (vLLM 0112-0114) |
