@@ -74,3 +74,15 @@ at production shapes. The same overlay with `VLLM_GREEDY_VERIFICATION` on, off a
 again, six samples of sixteen and eight different prompts, then a fixed-row profile of
 both (adaptive verification off): with the switch on the logits all-gather and the
 full-vocabulary passes must disappear.
+
+### Window 3 result and window 5 ([w5.json](w5.json))
+
+Window 3 measured no difference with the switch, and its profile showed why: with the
+switch on, the stock path still ran (the NCCL logits all-gather, the logits-stats and
+rejection kernels). A logged run (window 4) found the guard off: the served model is
+the vision-language wrapper, which delegates `compute_logits_local` but has no
+`lm_head` or `logits_processor` of its own. vLLM `fbaa04151` resolves both on the
+language model and logs once whether the path is on; the overlay now carries it (with
+`3d441bda9`'s warm-up). Window 2's greedy determinism run therefore exercised the
+gathered path, and its gate is rerun here: window 5 repeats window 3 with both
+determinism modes on every arm.
