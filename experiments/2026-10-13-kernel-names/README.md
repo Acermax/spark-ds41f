@@ -32,3 +32,20 @@ prim_func's `def` and `return` change (94 lines in 12 files); the generated code
 results do not. sparknet's TileLang collectives and DeepSeek's TileKernels live in their
 own packages and are not renamed here.
 
+
+## Inputs
+
+- [vllm/series](vllm/series): r6h's series plus 0118. Replayed as build prepare does,
+  the r6h part reproduces r6h's patch head `e39cd9da9938`; with 0118 the head is
+  `b73533b54102`, tree `143fd2a94198`.
+- [upstreams.lock.json](upstreams.lock.json), [source.json](source.json): r6i's (sparknet
+  main) with that series.
+- [r6j-tp4.json](r6j-tp4.json): the r6i release candidate (sparknet TileLang collectives,
+  big-core proxy, TileLang prefetch, cost scale 1.0, its curves) on image `-r6j`.
+
+## Image ([image.json](image.json))
+
+Built on dgx4 and copied like r6i's. Gate: `--wide` determinism with and without
+logprobs (references must stay r6f's), sixteen and eight different prompts, and a
+fixed-row profile ([r6j-fixed.json](r6j-fixed.json), code16) whose kernel summaries must
+show the names.
