@@ -49,3 +49,13 @@ Built on dgx4 and copied like r6i's. Gate: `--wide` determinism with and without
 logprobs (references must stay r6f's), sixteen and eight different prompts, and a
 fixed-row profile ([r6j-fixed.json](r6j-fixed.json), code16) whose kernel summaries must
 show the names.
+
+## Release comparison ([release-tp4.json](release-tp4.json))
+
+The promotable migration candidate ([r6j-release.json](r6j-release.json)): image `-r6j`
+with sparknet's TileLang collectives, the big-core proxy and the TileLang prefetch, cost
+scale 2.0 and production's cost curves (`ring4-r6h-headout-20261012`). That is r6i window
+1's "full" arm (level with r6h, same bits) plus the named kernels; r6i's release showed
+cost scale 1.0 losing at eight prompts, so it stays out. r6j / r6h / r6j again, queued on
+dgx1 behind the image job so it runs unattended; the queue restores production (r6h) when
+it is done.
