@@ -224,3 +224,27 @@ indexed, three seeds each, and no route slower (TP4 SWA-only 12.4 / 28.7 / 73.4 
 reference, the sweep-2 tiles, WO-B's decode tiles), the TileLang DSpark context-KV
 projection (port B6) and the sparse MLA fold fix. [retire-screen.json](retire-screen.json):
 retire, r6j, retire again, with the WO screen's measurements.
+
+### Retirement screen (2026-10-13, 18:57-19:28 UTC)
+
+| against r6j | retire | retire again |
+| --- | ---: | ---: |
+| temperature 0 | **identical, mixed15 0/0** (new references `70b3379cc289` / `708ec5b17482`) | identical |
+| quality | 5/5 | 5/5 |
+| sixteen different prompts | **+1.8%** | **+1.5%** |
+| four / eight | level | level / -0.9% |
+| paired sweep | level | level |
+| prefill 32K / 256K | level / **-0.8%** | level / **-0.9%** |
+
+Correct, at the reference's precision. Not yet well ahead. [bundles/retire-kernels](bundles/retire-kernels) (19:27-19:30) per call:
+- **WO:** faster warm at 1-12 rows (0.77-0.99), slower at 16-96 (1.09-1.37 warm, ~1.05 cold), 512 (1.23) and 2048 (1.05); 0.69 at 8192.
+- **B6:** 0.36-0.60 of B12X at 1-64 rows; level at 72-96 cold; 1.09-1.11 at 512-2048; 0.62 at 8192.
+- **Why prefill loses:** SP prefill projects WO in 1024-row slices (4 owners x 2 slices of an 8192-token chunk), where TileLang costs ~0.45 us a row against B12X's ~0.41. About 1% of a chunk.
+- **Why decode loses:** five kernels (RoPE, WO-A, split reduce, cast, WO-B) against B12X's one.
+
+**Fused cast** (vLLM `wo-fused-cast` `51c752bbd`): WO-A's last kernel rounds to BF16 and applies
+the reference's cast itself (the in-kernel GEMM's epilogue, or the split reduce), so WO-B
+reads MXFP8 straight from WO-A. This drops the BF16 `a` round trip (~10 MB per 1024-row slice)
+and two kernels. The bytes equal `per_token_cast` of the BF16 `a` (new test). [bundles/wo-fused](bundles/wo-fused)
+([wo-fused.json](wo-fused.json)) runs the tests, the invariance check and
+[bench_wo2.py](bench_wo2.py).
