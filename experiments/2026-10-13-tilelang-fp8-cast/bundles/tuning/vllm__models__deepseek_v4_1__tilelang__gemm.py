@@ -298,9 +298,6 @@ def _mxfp8_gemm_cast(
     words = block_K // SF_WORD_K
     sf_words = scale_words(K)
     items = block_M * words  # one thread item per row and packed word
-    last = num_stages - 1
-    # Loads in stage 0; the cast, the MMA and (with shards) the shard sum in the last.
-    stages = [0, 0, 0, last, last] + ([last] if shards > 1 else [])
 
     @T.prim_func
     def gemm_mxfp8_cast(
@@ -325,49 +322,46 @@ def _mxfp8_gemm_cast(
             T.clear(C_local)
             if shards > 1:
                 T.clear(C_total)
-            for ko in T.Pipelined(
-                k_blocks,
-                num_stages=num_stages,
-                order=list(range(len(stages))),
-                stage=stages,
-            ):
+            for ko in T.Pipelined(k_blocks, num_stages=num_stages):
                 T.copy(A[by * block_M, ko * block_K], X_shared)
                 T.copy(B[bx * block_N, ko * block_K], B_shared)
-                for j, w in T.Parallel(block_N, words):
-                    SFB_shared[j, w] = SFB[T.min(bx * block_N + j, N - 1), ko * words + w]
+                for sj, sw in T.Parallel(block_N, words):
+                    SFB_shared[sj, sw] = SFB[T.min(bx * block_N + sj, N - 1), ko * words + sw]
                 # The reference's act_quant, one 128-element word per thread item.
                 for step in T.serial(T.ceildiv(items, threads)):
                     item = step * threads + tx
                     if item < items:
-                        i = item // words
-                        w = item % words
+                        qrow = item // words
+                        qword = item % words
                         packed[0] = T.uint32(0)
-                        for g in T.serial(4):
-                            base = w * SF_WORD_K + g * SF_BLOCK
+                        for qg in T.serial(4):
+                            qbase = qword * SF_WORD_K + qg * SF_BLOCK
                             amax[0] = T.float32(0)
-                            for e in T.serial(SF_BLOCK):
-                                amax[0] = T.max(amax[0], T.abs(T.Cast(T.float32, X_shared[i, base + e])))
+                            for qe in T.serial(SF_BLOCK):
+                                amax[0] = T.max(
+                                    amax[0], T.abs(T.Cast(T.float32, X_shared[qrow, qbase + qe]))
+                                )
                             amax[0] = T.max(amax[0], T.float32(_AMAX_FLOOR))
-                            bits = T.reinterpret(T.uint32, amax[0] * T.float32(_FP8_MAX_INV))
-                            exponent = T.Cast(
+                            qbits = T.reinterpret(T.uint32, amax[0] * T.float32(_FP8_MAX_INV))
+                            qexp = T.Cast(
                                 T.int32,
-                                (bits >> 23) & T.uint32(0xFF),
+                                (qbits >> 23) & T.uint32(0xFF),
                             ) - 127 + T.if_then_else(
-                                (bits & T.uint32(0x7FFFFF)) != T.uint32(0), 1, 0
+                                (qbits & T.uint32(0x7FFFFF)) != T.uint32(0), 1, 0
                             )
-                            scale = T.reinterpret(
-                                T.float32, T.Cast(T.uint32, (exponent + 127) << 23)
+                            qscale = T.reinterpret(
+                                T.float32, T.Cast(T.uint32, (qexp + 127) << 23)
                             )
-                            for e in T.serial(SF_BLOCK):
-                                A_shared[i, base + e] = T.clamp(
-                                    T.Cast(T.float32, X_shared[i, base + e]) / scale,
+                            for qe in T.serial(SF_BLOCK):
+                                A_shared[qrow, qbase + qe] = T.clamp(
+                                    T.Cast(T.float32, X_shared[qrow, qbase + qe]) / qscale,
                                     T.float32(-_FP8_MAX),
                                     T.float32(_FP8_MAX),
                                 )
                             packed[0] = packed[0] | (
-                                T.Cast(T.uint32, exponent + 127) << (8 * g)
+                                T.Cast(T.uint32, qexp + 127) << (8 * qg)
                             )
-                        SFA_shared[i, w] = packed[0]
+                        SFA_shared[qrow, qword] = packed[0]
                 T.mma_gemm_blockscaled(
                     A_shared,
                     B_shared,
