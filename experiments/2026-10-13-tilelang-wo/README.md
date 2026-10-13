@@ -286,3 +286,12 @@ numbers mix speed with acceptance (-1.4% +-5.2% accepted). [fused-fixed-profile.
 compares kernel time per step at fixed rows with adaptive verification off (code16: 96
 rows a step; c8: 48; one 16K prefill), fused first, using [analyze_costs.py](analyze_costs.py)
 with families for the TileLang kernel names.
+
+### Inverse RoPE in WO-A (vLLM `wo-rope-fused` `f806f5103`)
+
+WO-A rotates each head's last 64 columns back as it loads that K block (`rope_`'s
+arithmetic in shared memory), so the separate RoPE kernel and the in-place write of the
+attention output go: decode WO is two kernels on the in-kernel path, three on the split
+path (B12X: one). [bundles/wo-rope](bundles/wo-rope) ([wo-rope.json](wo-rope.json)): the
+tests (the cast bytes equal `per_token_cast` of WO-A on `rope_`'s output, and the input
+is not written), invariance, [bench_wo3.py](bench_wo3.py).
