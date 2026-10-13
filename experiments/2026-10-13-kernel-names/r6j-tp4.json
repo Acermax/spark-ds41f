@@ -5,7 +5,7 @@
     "name": "dsv41-karmic-kraken",
     "image": "vllm-ds41f-kkref:19f2c20ed4d6-r6j",
     "expected_labels": {
-      "local.spark3.vllm.tree": "143fd2a94198b4f1614629500b4f557a4bf5bc68",
+      "local.spark3.vllm.tree": "36e5acb9fa6a14c46cd867a1dcfef9e6e8434e72",
       "local.spark3.b12x.tree": "1a647a311ca55d45070ab83d60668d9c8fb8886c",
       "local.spark3.nccl.tree": "6af10aa730a64fcee8781d62340a9c9184e79469",
       "local.spark3.tilelang.tree": "1697ad52fab8379ce78f9abc547c7b1e02cd9c5e",

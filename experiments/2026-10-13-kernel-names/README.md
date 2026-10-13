@@ -24,11 +24,11 @@ kernel, so a profile line names the module that holds it (TileLang appends `_ker
 | `rope.py` / `router.py` | `rope` / `router_partials` |
 | `sparse_mla.py` | `sparse_mla` |
 | `vocab.py` | `vocab_packed_projection` |
-| `glm5next/nvidia/l2_prefetch_tilelang.py` | `l2_prefetch` (the file minus its family suffix) |
+| `glm5next/nvidia/tilelang/l2_prefetch.py` (moved from `glm5next/nvidia/l2_prefetch_tilelang.py`, the same family-directory layout as `deepseek_v4_1/tilelang/`) | `l2_prefetch` |
 
 Variants one factory builds (decode or prefill, a tile, a row bucket) share its name and
 differ by grid, as before, so retuning a tile never renames a kernel. Only each
-prim_func's `def` and `return` change (94 lines in 12 files); the generated code and the
+prim_func's `def` and `return` and the prefetch's path change; the generated code and the
 results do not. sparknet's TileLang collectives and DeepSeek's TileKernels live in their
 own packages and are not renamed here.
 
@@ -37,7 +37,7 @@ own packages and are not renamed here.
 
 - [vllm/series](vllm/series): r6h's series plus 0118. Replayed as build prepare does,
   the r6h part reproduces r6h's patch head `e39cd9da9938`; with 0118 the head is
-  `b73533b54102`, tree `143fd2a94198`.
+  `1c82f93146fb`, tree `36e5acb9fa6a`.
 - [upstreams.lock.json](upstreams.lock.json), [source.json](source.json): r6i's (sparknet
   main) with that series.
 - [r6j-tp4.json](r6j-tp4.json): the r6i release candidate (sparknet TileLang collectives,
