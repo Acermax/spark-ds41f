@@ -101,3 +101,25 @@ The candidate ([r6i-candidate.json](r6i-candidate.json)): r6i full with cost sca
 and its own curves (`ring4-r6i-20261013`, real rows, profiled on first boot). r6i /
 r6h / r6i again under the release profile. No separate fan pre-cool: the cluster had
 been lightly loaded, and each bench brings every node below 55 °C first.
+
+### Release comparison results (2026-10-13, 02:33-04:19 UTC)
+
+r6i / r6h / r6i again. Both r6i arms identical at temperature 0 (r6f's references) and
+5/5 on quality. Against r6h:
+
+| | r6i | r6i again |
+| --- | ---: | ---: |
+| sixteen different prompts | +0.7% ±0.7 | +0.3% ±0.6 |
+| eight | **-1.0% ±0.8** | **-1.2% ±1.0** |
+| four | -1.0% ±1.3 | -0.9% ±1.3 |
+| paired sweep, tok/s / accepted per step | +0.0% / +1.1% ±1.3 | +0.1% / +1.1% ±1.3 |
+| prefill 32K-1M | level (512K -0.4% ±0.4) | level (1M -0.2% ±0.2) |
+| mixed traffic p95 stream gap (one run) | +5.0% | +6.2% |
+
+**Not promotable:** eight prompts is slower in both arms. Window 1 put the migration
+switches level at eight prompts, so the loss comes with cost scale 1.0 and its curves:
+verifying more drafts lengthens the eight-stream step by more than the extra accepted
+drafts return (acceptance +1.1% ±1.3 here against window 2's +2.2%). The cost scale moves
+to the draft-acceptance work, judged per concurrency. The migration part (TileLang
+collectives, big-core proxy, TileLang prefetch) goes forward on r6j with scale 2.0 and
+production's curves, and needs its own release comparison.
