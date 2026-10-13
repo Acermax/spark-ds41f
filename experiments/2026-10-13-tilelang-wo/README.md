@@ -51,3 +51,6 @@ The output moves toward the reference (new temperature-0 references).
   the r6j image) / r6j ([r6j.json](r6j.json)) / r6j + WO again: determinism `--wide`
   (each arm identical within itself), quality, the paired sweep, four, eight and sixteen
   different prompts, prefill at 32K and 256K.
+- [sweep2.json](sweep2.json): [sweep_wo_a_v2.py](sweep_wo_a_v2.py), WO-A's tiles at four
+  shards that the first sweep did not try: 96- and 128-row tiles at 72-128 rows, and
+  wider tiles, `block_K` 128, three stages and 256 threads from 256 rows.
