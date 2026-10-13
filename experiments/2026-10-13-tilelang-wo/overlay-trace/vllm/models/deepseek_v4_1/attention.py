@@ -1428,6 +1428,7 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase):
             if tracing:
                 row_trace.record(self.prefix, "qr", positions, qr)
                 row_trace.record(self.prefix, "kv", positions, kv)
+                row_trace.raw(self.prefix, "qr", positions, qr)
             if self.indexer is not None:
                 index_weights = parts[2].contiguous()
             hidden_states = None
@@ -1442,9 +1443,18 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase):
             qr_kv, _ = self.fused_wqa_wkv(hidden_states)
             qr, kv = qr_kv.split((self.q_lora_rank, 512), dim=-1)
             qr, kv = self.q_norm(qr), self.kv_norm(kv)
+            if tracing:
+                row_trace.record(self.prefix, "qr", positions, qr)
+                row_trace.record(self.prefix, "kv", positions, kv)
+                row_trace.raw(self.prefix, "qr", positions, qr)
         q = self.wq_b(qr).view(rows, self.n_local_heads, 512)
+        if tracing:
+            row_trace.record(self.prefix, "q", positions, q)
+            row_trace.raw(self.prefix, "q", positions, q)
         l2_prefetch.issue(self._l2pf_wo, rows)
         q = self._rope(q, positions, "q")
+        if tracing:
+            row_trace.record(self.prefix, "qrope", positions, q)
         output = torch.empty_like(q)
         metadata = cast(
             dict[str, DeepseekV41B12xMetadata] | None,
