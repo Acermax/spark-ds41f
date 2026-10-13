@@ -1,0 +1,108 @@
+{
+  "experiment": "experiments/2026-10-14-servebench",
+  "run": "engine-validate",
+  "jobs": [
+    {
+      "kind": "sync"
+    },
+    {
+      "kind": "measure",
+      "bench": false,
+      "bracket": false,
+      "extras": [
+        [
+          "scripts/servebench_engine.py",
+          [
+            "--label",
+            "r6k-grid1",
+            "--output",
+            "results/private/servebench/engine/r6k-grid1.json"
+          ],
+          "engine-grid1"
+        ],
+        [
+          "scripts/servebench_engine.py",
+          [
+            "--label",
+            "r6k-grid2",
+            "--output",
+            "results/private/servebench/engine/r6k-grid2.json"
+          ],
+          "engine-grid2"
+        ]
+      ],
+      "arms": [
+        {
+          "config": "engine-r6k.json",
+          "label": "r6k"
+        }
+      ]
+    },
+    {
+      "kind": "measure",
+      "bench": false,
+      "bracket": false,
+      "extras": [
+        [
+          "scripts/servebench_engine.py",
+          [
+            "--label",
+            "r6h-grid1",
+            "--output",
+            "results/private/servebench/engine/r6h-grid1.json"
+          ],
+          "engine-grid1"
+        ],
+        [
+          "scripts/servebench_engine.py",
+          [
+            "--label",
+            "r6h-grid2",
+            "--output",
+            "results/private/servebench/engine/r6h-grid2.json"
+          ],
+          "engine-grid2"
+        ]
+      ],
+      "arms": [
+        {
+          "config": "engine-r6h.json",
+          "label": "r6h"
+        }
+      ]
+    },
+    {
+      "kind": "measure",
+      "bench": false,
+      "bracket": false,
+      "extras": [
+        [
+          "scripts/servebench_engine.py",
+          [
+            "--label",
+            "r6k-again-grid1",
+            "--output",
+            "results/private/servebench/engine/r6k-again-grid1.json"
+          ],
+          "engine-grid1"
+        ],
+        [
+          "scripts/servebench_engine.py",
+          [
+            "--label",
+            "r6k-again-grid2",
+            "--output",
+            "results/private/servebench/engine/r6k-again-grid2.json"
+          ],
+          "engine-grid2"
+        ]
+      ],
+      "arms": [
+        {
+          "config": "engine-r6k.json",
+          "label": "r6k-again"
+        }
+      ]
+    }
+  ]
+}

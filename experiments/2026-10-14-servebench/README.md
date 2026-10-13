@@ -15,3 +15,17 @@ On production r6h, in a lab window: closed loop at sixteen and eight requests in
 sixteen streams' capacity) with goodput limits of 2 s to first token and 100 ms per
 token, the sixteen-stream run again with the same seed (does its interval hold run to
 run?), then the burst distinct-stream measurements at sixteen and eight for comparison.
+
+## Engine cost grid ([engine-validate.json](engine-validate.json))
+
+`servebench engine` times the cost profile's fixed-shape dummy steps inside the server, the
+same work on every build (vLLM `engine-grid` `2e5bc3de3`: `GPUModelRunner.engine_grid` and
+`Worker.engine_grid` for the dev-mode collective RPC, mounted from [overlay](overlay); both
+files are unchanged across r6h, r6j and r6k).
+
+The run: r6k ([engine-r6k.json](engine-r6k.json)), r6h ([engine-r6h.json](engine-r6h.json)),
+then r6k again on a fresh boot, each with `VLLM_SERVER_DEV_MODE=1` and two grids per boot.
+That gives:
+- r6k against r6h on identical work;
+- the within-boot repeatability (grid 1 against grid 2);
+- the boot-to-boot spread (r6k against r6k again), the smallest difference worth believing.

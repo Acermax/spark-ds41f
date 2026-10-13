@@ -49,6 +49,27 @@ server scenario, GuideLLM and AIPerf.
   against a tolerance (default 3%) and marked "no interval". The comparison warns when
   the two runs' workloads differ.
 
+## Engine cost grid
+
+```sh
+python3 -m servebench engine http://127.0.0.1:8000 --output grid.json
+python3 -m servebench compare base-grid.json candidate-grid.json
+```
+
+The server times its own fixed-shape dummy steps, the speculative-decoding cost profile's
+steps, at the shapes asked for. The default grid:
+- verification rows for 1-16 requests at 4K and 64K context;
+- one and eight requests at 256K;
+- one request at the server's longest context;
+- 8K prefill chunks at 0, 64K and 256K.
+
+Each shape is warmed and then timed in rounds of alternating order (default 30). Every
+build does identical work with no text, acceptance or scheduling in it, so the step times
+are the engine's speed and their intervals are tight. This is the measurement that judges
+kernel and engine changes; tok/s judges what users get. It needs vLLM's dev-mode collective
+RPC (`VLLM_SERVER_DEV_MODE=1`) and a worker exposing `engine_grid`. It refuses a busy
+server and resets the prefix cache afterwards, since dummy steps write KV slots.
+
 ## Output
 
 `--output` writes `servebench/1` JSON: tool, server, workload (with the prompt set's
@@ -58,6 +79,7 @@ timeline. The last stdout line is a one-line summary (`{"summary": ...}`) for ta
 
 ## Planned
 
-Concurrency and rate sweeps (throughput against per-user speed), and precision: per-token
+Model behaviour per build (acceptance by draft position, teacher-forced log-probabilities:
+KL divergence, top-1 agreement, perplexity), concurrency and rate sweeps (throughput against per-user speed), and precision: per-token
 log-probabilities on fixed text against a baseline (KL divergence, top-1 agreement,
 perplexity) as a gate before speed.
