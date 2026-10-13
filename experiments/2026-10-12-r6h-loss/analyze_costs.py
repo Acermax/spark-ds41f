@@ -46,11 +46,24 @@ def family(name, grid):
     return "other"
 
 
+# The TileLang packed head's vocabulary blocks: the TP4 shard (32,320 rows) and the TP3
+# shard (43,136) at block_N 32 (16- and 64-row tiles) and 16 (32-row tiles).
+VOCAB_BLOCKS = {1010, 2020, 1348, 2696}
+
+
 def head_launch(name, grid):
-    """The target LM head's vocabulary projection on rank 0's 43136-row shard."""
-    return bool(grid) and (("_row_kernel" in name and grid[0] == 43136)
-                           or ("nvjet" in name and grid[0] == 2696)
-                           or ("cutlass_80" in name and grid[1] == 337))
+    """Target LM head launches per step: the B12X-era kernels on rank 0's 43136-row shard
+    count once; the TileLang packed head (main_kernel before vLLM 0118,
+    packed_vocab_projection_kernel since) counts one half, because the drafter calls it
+    once a step as well."""
+    if not grid:
+        return 0
+    if (("_row_kernel" in name and grid[0] == 43136) or ("nvjet" in name and grid[0] == 2696)
+            or ("cutlass_80" in name and grid[1] == 337)):
+        return 1
+    if name in ("main_kernel", "packed_vocab_projection_kernel") and (grid[0] in VOCAB_BLOCKS or grid[1] in VOCAB_BLOCKS):
+        return 0.5
+    return 0
 
 
 def load(path):
@@ -61,7 +74,7 @@ def load(path):
         f = family(name, grid)
         fam[f] += ms
         by_kernel[(f, name[:90], json.dumps(grid))] += ms
-        steps += launches if head_launch(name, grid) else 0
+        steps += launches * head_launch(name, grid)
     return d, fam, by_kernel, steps
 
 
