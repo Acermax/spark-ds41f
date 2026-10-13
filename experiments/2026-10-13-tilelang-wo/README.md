@@ -54,3 +54,26 @@ The output moves toward the reference (new temperature-0 references).
 - [sweep2.json](sweep2.json): [sweep_wo_a_v2.py](sweep_wo_a_v2.py), WO-A's tiles at four
   shards that the first sweep did not try: 96- and 128-row tiles at 72-128 rows, and
   wider tiles, `block_K` 128, three stages and 256 threads from 256 rows.
+
+## Screen results (2026-10-13, 16:16-16:45 UTC)
+
+| against r6j | wo | wo again |
+| --- | ---: | ---: |
+| quality | 5/5 | 5/5 |
+| temperature 0 | **mixed15 7 of 16 differ** (from the first token's logprob) | **7 of 16** |
+| four / eight different prompts | **+2.4% / +2.4%** | **+1.9% / +2.2%** |
+| sixteen, paired sweep | level | level |
+| prefill 32K / 256K | level | level / -0.3% |
+
+Faster at four and eight prompts, but not deterministic in mixed15, where prompts prefill
+sequence-parallel together and alone below the SP threshold. Not the kernels:
+[check_wo_invariance.py](check_wo_invariance.py) found every row count 1-300 and every
+boundary to 4096, at offsets 0, 7, 100 and 1000, identical to the same rows of one
+8192-row call. The attention output is an ordinary allocation, and the TileLang and B12X
+WO paths hand the same BF16 partials to the same `project_reduce_scatter` and
+`all_reduce`.
+
+[debug.json](debug.json) bisects in serving with temporary switches (vLLM
+`wo-determinism-debug` `d0bb54446`, `VLLM_DS41_WO_DEBUG`): a copy of the attention output
+instead of rotating it in place, a private scratch instead of the shared workspace, and
+one slice instead of two, each alone and all together; determinism only.
