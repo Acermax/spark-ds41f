@@ -183,7 +183,7 @@
     "SPARKNET_ROCE_KERNELS": "tilelang",
     "SPARKNET_ROCE_PROXY_CPU": "big",
     "VLLM_L2_PREFETCH_KERNELS": "tilelang",
-    "VLLM_DS41_ROW_TRACE": "/cache/row-trace/wo-trace"
+    "VLLM_DS41_ROW_TRACE": "/cache/row-trace/wo-trace2"
   },
   "serve_args": [
     "/models",
