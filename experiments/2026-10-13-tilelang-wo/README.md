@@ -248,3 +248,23 @@ reads MXFP8 straight from WO-A. This drops the BF16 `a` round trip (~10 MB per 1
 and two kernels. The bytes equal `per_token_cast` of the BF16 `a` (new test). [bundles/wo-fused](bundles/wo-fused)
 ([wo-fused.json](wo-fused.json)) runs the tests, the invariance check and
 [bench_wo2.py](bench_wo2.py).
+
+### Fused cast results (2026-10-13, 19:42-19:52 UTC)
+
+Tests: 14 WO (the fused bytes equal `per_token_cast` on both paths), 7 block-32, invariance at
+every size and offset. [bench_wo2.py](bench_wo2.py) against B12X's fused WO:
+
+| rows | before (warm / cold) | fused (warm / cold) |
+| ---: | ---: | ---: |
+| 1-16 | 0.77-1.09 / 1.02-1.06 | **0.69-0.96** / 1.03-1.06 |
+| 24-32 | 1.10-1.17 / 1.02-1.04 | 0.83-0.98 / 1.02-1.04 |
+| 48-64 | 1.13-1.35 / 1.06-1.07 | 1.12-1.39 / 1.05 |
+| 72-96 | 1.22-1.37 / 1.06-1.08 | 1.06-1.20 / 1.07-1.08 |
+| 512 | 1.23 / 1.37 | 1.16 / 1.35 |
+| 2048 | 1.05 / 1.07 | **1.01 / 1.02** |
+| 8192 | 0.69 / 0.68 | **0.67 / 0.66** |
+
+(Two runs differ by up to 15% warm at 64-96 rows.) WO-A's BF16 GEMM runs at a steady ~75
+TFLOP/s at every size; matching B12X, whose WO-A is FP8 (half the tensor work), rests on
+the rest of the pipeline. [fused.json](fused.json) ([overlay-fused](overlay-fused), vLLM
+`51c752bbd`) and [fused-screen.json](fused-screen.json): fused, r6j, fused again.
