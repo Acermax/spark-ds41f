@@ -77,3 +77,27 @@ explicitly requested TileLang prefetch that fails to compile stop the start inst
 disabling itself. Checked in a GPU container on the r6j image with the corrected file:
 "TileLang kernel ready". New head `004b7cb75fdf`, tree `c4d86d34146d`; the image job and
 the release comparison run again.
+
+### Release comparison results (2026-10-13, 10:35-12:19 UTC)
+
+r6j / r6h / r6j again, with the prefetch fixed. Both r6j arms identical at temperature 0
+(r6f's references), 5/5 on quality. Against r6h:
+
+| | r6j | r6j again |
+| --- | ---: | ---: |
+| paired sweep, one stream, tok/s | **-0.4% ±0.1** | **-0.3% ±0.1** |
+| accepted per step | +0.0% | +0.0% |
+| four / eight / sixteen different prompts | -0.2 / -0.1 / -0.0% | -0.2 / -0.2 / -0.5% |
+| prefill 32K-256K | level | level |
+| prefill 512K / 1M | -0.3% ±0.3 / **-0.2% ±0.1** | -0.1% / **-0.2% ±0.2** |
+| mixed traffic | level | level |
+
+Level at concurrency and in prefill up to 256K, but one stream reads 0.3-0.4% slower in
+both arms (the paired sweep runs identical text, hence its narrow interval) and 1M prefill
+0.2% slower. r6i's window 1 screened the switches only at four, eight and sixteen prompts;
+at one stream the collectives, the proxy placement and the prefetch are latency-bound. Next:
+a bisect at one stream and 1M before promotion.
+
+The profile of the fixed image still shows no prefetch kernel under either family's name,
+although throughput shows it running (the broken image lost 5-7% of decode without it):
+the profile summary does not see the TileLang prefetch on its side stream. Open.
