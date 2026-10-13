@@ -80,3 +80,24 @@ few drafts. The scale cannot change the output (it only sets how many drafts a s
 verifies). Arms on r6i full: 1.0, 2.0, 1.5, 1.0 again, each with the paired
 sixteen-prompt sweep (one stream) and sixteen, eight and four different prompts; then
 determinism on 1.0.
+
+### Window 2 results (2026-10-13, 02:02-02:31 UTC)
+
+Against scale 2.0, same session (scale 1.0 measured twice):
+
+| | 1.0 | 1.0 again | 1.5 |
+| --- | ---: | ---: | ---: |
+| accepted drafts per step, paired over sixteen prompts | **+2.2% ±1.0** | **+2.2% ±1.0** | +1.5% ±0.8 |
+| one stream, sixteen prompts paired, tok/s | +0.7% ±0.6 | +0.4% ±0.7 | +0.6% ±0.5 |
+| four / eight / sixteen different prompts | level | level | level |
+
+Identical at temperature 0 with r6f's references. On real-row curves 2.0 priced
+verification too high; 1.0 verifies more drafts and accepts 2.2% more per step without
+slowing any concurrency.
+
+## Release comparison ([release-tp4.json](release-tp4.json))
+
+The candidate ([r6i-candidate.json](r6i-candidate.json)): r6i full with cost scale 1.0
+and its own curves (`ring4-r6i-20261013`, real rows, profiled on first boot). r6i /
+r6h / r6i again under the release profile. No separate fan pre-cool: the cluster had
+been lightly loaded, and each bench brings every node below 55 °C first.
