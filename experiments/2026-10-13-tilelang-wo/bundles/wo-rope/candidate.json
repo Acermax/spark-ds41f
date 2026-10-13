@@ -1,5 +1,5 @@
 {
-  "description": "WO with the inverse RoPE and the reference cast fused into WO-A (vLLM wo-rope-fused f806f5103): the WO and block-32 tests, row invariance, then the WO against B12X (verdict on correctness only).",
+  "description": "WO with the inverse RoPE and the reference cast fused into WO-A (vLLM wo-rope-fused 2d1c6b2a2): the WO and block-32 tests, row invariance, then the WO against B12X (verdict on correctness only).",
   "image": "vllm-ds41f-kkref:19f2c20ed4d6-r6j",
   "env": {
     "HF_HUB_OFFLINE": "1"
