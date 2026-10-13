@@ -127,3 +127,25 @@ Four shards, best configuration per row count (warm / cold µs, CUDA graphs):
 moves from in-kernel 32 to split 96). Every `block_M` 128 / `block_K` 128 in-kernel
 configuration failed to compile (shared memory). Bits do not depend on the tile. Adopted
 after the determinism fix, so the screen judges one change.
+
+## Trace results (2026-10-13, 17:35-17:56 UTC)
+
+- **privateall** (the WO's scratch private on every path): mixed15 still 7 of 16, the
+  same requests and tokens. The workspace is not the cause.
+- **trace**: mixed15's fifteen prompts prefill in **one forward of 263 rows**, which is
+  past the 205-token threshold and so sequence-parallel; each prompt alone (14-22 rows) is
+  not. Batches below the threshold are equal to the prompt alone at every stage (eight
+  prompts in 144 rows: all 160 records). In the SP forward, seven prompts first differ
+  at layer 1 or 2's attention output, where layer 0's was equal.
+- **trace with the B12X WO** (`VLLM_DS41_WO_DEBUG=b12x`, mixed15 0 of 16 differ):
+  the same SP forward also differs from the prompts alone inside, single rows of layer
+  1's attention output, but those differences do not reach the outputs. SP prefill was
+  never bit-identical to the prompt alone inside the model; the B12X WO's outputs hid it.
+- **trace with the TileLang WO**, every rank: the earliest difference is layer 0's summed
+  WO result for one row on rank 1, whose four partials (each rank's `wo`) equal the prompt
+  alone. The SP sum (the exchanged parts added in rank order) and the alone sum (the one-shot
+  all-reduce) are the same arithmetic, FP32 from rank 0 rounded once, so the parts that
+  arrived must differ from those sent, or the trace read them early.
+
+[trace-raw.json](trace-raw.json) keeps layers 0 and 1's WO partials, the received parts
+and both sums raw (vLLM `wo-row-trace`), to recompute the sums offline.

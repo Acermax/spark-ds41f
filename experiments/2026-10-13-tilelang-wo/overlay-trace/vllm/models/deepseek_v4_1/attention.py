@@ -87,11 +87,16 @@ def _trace_sp_sum(prefix, positions, sp_rows, result) -> None:
     """DEBUG ONLY: this rank's rows of an SP WO result, summed in rank order."""
     if not row_trace.enabled():
         return
+    real, start = sp_rows.real_rows, sp_rows.start
     if result.dim() == 3:  # unreduced (N, L, hidden) parts
         from vllm.models.deepseek_v4_1.tilelang.collectives import RankOrderParts
 
+        row_trace.raw(
+            prefix, "parts", positions[start : start + real], result[:, :real].transpose(0, 1),
+            row0=start,
+        )
         result = RankOrderParts(result).sum()
-    real, start = sp_rows.real_rows, sp_rows.start
+    row_trace.raw(prefix, "ar", positions[start : start + real], result[:real], row0=start)
     row_trace.record(
         prefix, "ar", positions[start : start + real], result[:real], row0=start
     )
@@ -2184,6 +2189,9 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase):
                     row_trace.record(
                         self.prefix, "wo", positions[start:stop], out, row0=start
                     )
+                    row_trace.raw(
+                        self.prefix, "wo", positions[start:stop], out, row0=start
+                    )
 
             result = sp_rows.project_reduce_scatter(
                 project,
@@ -2208,10 +2216,12 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase):
         tracing = row_trace.enabled()
         if tracing:
             row_trace.record(self.prefix, "wo", positions, local)
+            row_trace.raw(self.prefix, "wo", positions, local)
         if get_tensor_model_parallel_world_size() > 1:
             local = get_tp_group().all_reduce(local)
         if tracing:
             row_trace.record(self.prefix, "ar", positions, local)
+            row_trace.raw(self.prefix, "ar", positions, local)
         return local
 
     def _o_proj(self, o, positions, *, is_prefill=False, sp_rows=None):
