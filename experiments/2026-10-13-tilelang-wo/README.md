@@ -163,3 +163,14 @@ one-ulp difference, and the TileLang WO keeps the reference's BF16 and passes it
 
 [trace-q.json](trace-q.json) records the query path (`qr`, `kv`, `q` after `wq_b`, `q`
 after RoPE) in every forward, raw for layers 0-1 in forwards up to 512 rows.
+
+## Query-path trace (2026-10-13, 18:27-18:36 UTC)
+
+On rank 2, the prompt whose layer-0 output differed has the same `qr`, `kv`, `q` and rotated
+`q` as alone: **the sparse MLA kernel** returns different bits for the same query and keys.
+The plan routes a forward by its rows: for the SWA-only layer 0 at TP4 (one 128-entry
+segment, 16 heads, 48 SMs) `split` to 48 rows, `decode` to 144, `extend` past that. Alone
+(14-22 rows) is `split`, the eight-prompt batch (144) `decode` and equal, mixed15 (263)
+`extend` and different. The kernels are built with `TL_ENABLE_FAST_MATH`.
+[check_mla_routes.py](check_mla_routes.py) ([mla-routes.json](mla-routes.json)) compares
+the routes on 1024 rows with short and full key lists.

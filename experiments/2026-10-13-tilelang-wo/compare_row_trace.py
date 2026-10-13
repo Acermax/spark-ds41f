@@ -12,7 +12,8 @@ before WO), "wo" (this rank's WO partial, before the TP sum) and "ar" (after it;
 sequence-parallel step only this rank's rows, from row ``row0``).
 
 A prompt's prefill is a run of rows at positions 0, 1, ... in a forward; prompts are
-told apart by the first target layer's attention output over the run. For each prompt
+told apart by the first target layer's "qr" over the run (the same on every rank), or
+its attention output in traces without "qr". For each prompt
 prefilled both alone and beside other rows, prints the first (layer, stage) whose
 hashes differ on the rows both forwards recorded, in the alone forward's order.
 
@@ -40,7 +41,10 @@ def runs(positions):
 
 
 def first_output(records):
-    return next(r for r in records if r[1] == "o")
+    """The first layer's record that keys prompts: "qr" if traced, else "o"."""
+    return next((r for r in records if r[1] == "qr"), None) or next(
+        r for r in records if r[1] == "o"
+    )
 
 
 def compare_rank(directory):
@@ -68,7 +72,7 @@ def compare_rank(directory):
             if ref is None:
                 continue
             result = first_difference(ref[1], index, start, n)
-            sp = o[4].get("sp")
+            sp = next((r[4] for r in records if r[1] == "o"), {}).get("sp")
             lines.append(f"  {name} ({len(o[2])} rows, sp={sp}) run at {start} ({n} rows) "
                          f"against {ref[0]}: {result}")
     return lines
