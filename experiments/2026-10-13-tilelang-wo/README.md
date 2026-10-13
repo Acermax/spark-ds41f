@@ -209,3 +209,18 @@ The fix (vLLM `mla-route-fold` `2b0f96b27`): every route folds as `fma(l, b, L *
 `fma(acc, b, o * a)`, where the product the constant meets is exact and the fused product
 is explicit. [bundles/mla-fix](bundles/mla-fix) ([mla-fix.json](mla-fix.json)) runs the
 attention tests (with a new short-row route test), the route check and the timing.
+
+### Fix verified (2026-10-13, 18:54-18:56 UTC)
+
+[bundles/mla-fix](bundles/mla-fix), production fast math: the attention tests pass (14, with
+the new short-row route test), every route identical at 16 and 24 heads, SWA-only and
+indexed, three seeds each, and no route slower (TP4 SWA-only 12.4 / 28.7 / 73.4 us at 1 /
+96 / 263 rows, as before).
+
+## The retirement candidate's screen
+
+[retire.json](retire.json) mounts vLLM `wo-retire` `2b0f96b27` over the r6j image
+([overlay-retire](overlay-retire)): the TileLang WO (WO-A on BF16 activations as the
+reference, the sweep-2 tiles, WO-B's decode tiles), the TileLang DSpark context-KV
+projection (port B6) and the sparse MLA fold fix. [retire-screen.json](retire-screen.json):
+retire, r6j, retire again, with the WO screen's measurements.
