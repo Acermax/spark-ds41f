@@ -193,3 +193,19 @@ measurably faster or slower either way (TP4 SWA-only: 12.4 / 28.7-30.8 / 73-75 u
 263 rows). The extend kernel computes something its source does not share with decode.
 [bundles/mla-source](bundles/mla-source) prints both kernels' generated source and checks
 rows with exactly one, two and three keys.
+
+### The cause (2026-10-13, 18:51 UTC, [bundles/mla-fold](bundles/mla-fold))
+
+Recomputing the fold from decode's per-segment state: extend's output is
+`L = fma(l, b, a)` (one rounding) on **every** differing element (30 of 30 at 16 heads, 52 of
+52 at 24), decode's is `L = a + round(l * b)`. The source of both is `fma(L, a, l * b)`. On
+SWA-only layers extend has one segment, so its fold unrolls with the constant start `L = 1`;
+the compiler rewrites `fma(1, a, l * b)` as `a + l * b` and, the vectorized multiply being an
+ordinary one, contracts it into `fma(l, b, a)`. Decode's merge is a separate kernel whose
+`__fmul_rn` cannot contract. Indexed layers (five segments, no unrolling) never differed;
+one-key rows (`l * b` exact) never differed.
+
+The fix (vLLM `mla-route-fold` `2b0f96b27`): every route folds as `fma(l, b, L * a)` and
+`fma(acc, b, o * a)`, where the product the constant meets is exact and the fused product
+is explicit. [bundles/mla-fix](bundles/mla-fix) ([mla-fix.json](mla-fix.json)) runs the
+attention tests (with a new short-row route test), the route check and the timing.
