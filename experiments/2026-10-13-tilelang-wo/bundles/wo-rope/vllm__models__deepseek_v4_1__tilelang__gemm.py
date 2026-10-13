@@ -551,6 +551,7 @@ def fp8w_bf16_gemm_cast(
             g = bx // n_tiles
             n0 = g * N + (bx % n_tiles) * block_N
             A_shared = T.alloc_shared((block_M, block_K), T.bfloat16)
+            A_raw = T.alloc_shared((block_M, block_K), T.bfloat16) if POS is not None else None
             W_shared = T.alloc_shared((block_N, block_K), T.float8_e4m3fn)
             S_shared = T.alloc_shared((block_N // 32, block_K // 32), T.float32)
             B_shared = T.alloc_shared((block_N, block_K), T.bfloat16)
@@ -568,7 +569,7 @@ def fp8w_bf16_gemm_cast(
             for ko in T.Pipelined(k_blocks, num_stages=num_stages):
                 _w8a16_step(A, W, E, A_shared, W_shared, S_shared, B_shared, C_local,
                             by, g, n0, ko, K, block_M, block_N, block_K,
-                            None if POS is None else (POS, CS, M, head_dim, rope))  # fmt: skip
+                            None if POS is None else (POS, CS, M, head_dim, rope, A_raw))  # fmt: skip
                 if shards > 1:  # noqa: SIM102
                     if (ko + 1) % shard_blocks == 0:
                         for i, j in T.Parallel(block_M, block_N):
@@ -626,25 +627,40 @@ def _w8a16_step(
     tile's UE8M0 exponents to FP32 powers of two once (a per-element uint8 gather
     vectorizes to a byte pack nvcc rejects), expand the weights exactly to BF16, MMA.
 
-    With ``rope`` (positions, cos/sin table, rows, head width, rotated width) the K block
-    holding a head's last ``rotated`` columns is rotated back first, as ``rope_``'s
-    inverse does it (GPT-J pairs, FP32 ``ieee_fmaf``, rounded to BF16)."""
-    T.copy(A[by * block_M, g * K + ko * block_K], A_shared)
-    if rope is not None:
-        positions, cos_sin, M, head_dim, rotated = rope
-        if ko % (head_dim // block_K) == head_dim // block_K - 1:
-            for i, p in T.Parallel(block_M, rotated // 2):
-                position = positions[T.min(by * block_M + i, M - 1)]
-                cosine = cos_sin[position, p]
-                sine = cos_sin[position, rotated // 2 + p]
-                first = T.Cast(T.float32, A_shared[i, 2 * p])
-                second = T.Cast(T.float32, A_shared[i, 2 * p + 1])
-                A_shared[i, 2 * p] = T.Cast(
-                    T.bfloat16, T.ieee_fmaf(first, cosine, second * sine)
-                )
-                A_shared[i, 2 * p + 1] = T.Cast(
-                    T.bfloat16, T.ieee_fmaf(first, -sine, second * cosine)
-                )
+    With ``rope`` (positions, cos/sin table, rows, head width, rotated width, a raw
+    activation tile buffer) the K block holding a head's last ``rotated`` columns is
+    rotated back as it moves to ``A_shared``, as ``rope_``'s inverse does it (GPT-J
+    pairs, FP32 ``ieee_fmaf``, rounded to BF16)."""
+    if rope is None:
+        T.copy(A[by * block_M, g * K + ko * block_K], A_shared)
+    else:
+        # One write per stage (the pipeline planner allows no more): the tile lands
+        # raw, and A_shared is produced from it, rotated in the RoPE block.
+        positions, cos_sin, M, head_dim, rotated, A_raw = rope
+        T.copy(A[by * block_M, g * K + ko * block_K], A_raw)
+        rotate = ko % (head_dim // block_K) == head_dim // block_K - 1
+        for i, j in T.Parallel(block_M, block_K):
+            # Only the RoPE block reads the position and the table.
+            position = T.if_then_else(
+                rotate, positions[T.min(by * block_M + i, M - 1)], T.int64(0)
+            )
+            pair = j // 2
+            cosine = T.if_then_else(rotate, cos_sin[position, pair], T.float32(0))
+            sine = T.if_then_else(rotate, cos_sin[position, rotated // 2 + pair], T.float32(0))
+            first = T.Cast(T.float32, A_raw[i, pair * 2])
+            second = T.Cast(T.float32, A_raw[i, pair * 2 + 1])
+            A_shared[i, j] = T.if_then_else(
+                rotate,
+                T.Cast(
+                    T.bfloat16,
+                    T.if_then_else(
+                        j % 2 == 0,
+                        T.ieee_fmaf(first, cosine, second * sine),
+                        T.ieee_fmaf(first, -sine, second * cosine),
+                    ),
+                ),
+                A_raw[i, j],
+            )
     T.copy(W[n0, ko * block_K], W_shared)
     for r, c in T.Parallel(block_N // 32, block_K // 32):
         exponent = T.Cast(T.uint32, E[n0 // 32 + r, ko * (block_K // 32) + c])
@@ -691,6 +707,7 @@ def fp8w_bf16_gemm_partials(
             g = bx // n_tiles
             n0 = g * N + (bx % n_tiles) * block_N
             A_shared = T.alloc_shared((block_M, block_K), T.bfloat16)
+            A_raw = T.alloc_shared((block_M, block_K), T.bfloat16) if POS is not None else None
             W_shared = T.alloc_shared((block_N, block_K), T.float8_e4m3fn)
             S_shared = T.alloc_shared((block_N // 32, block_K // 32), T.float32)
             B_shared = T.alloc_shared((block_N, block_K), T.bfloat16)
@@ -699,7 +716,7 @@ def fp8w_bf16_gemm_partials(
             for kb in T.Pipelined(shard_blocks, num_stages=num_stages):
                 _w8a16_step(A, W, E, A_shared, W_shared, S_shared, B_shared, C_local,
                             by, g, n0, s * shard_blocks + kb, K, block_M, block_N,
-                            block_K, None if POS is None else (POS, CS, M, head_dim, rope))  # fmt: skip
+                            block_K, None if POS is None else (POS, CS, M, head_dim, rope, A_raw))  # fmt: skip
             T.copy(
                 C_local,
                 P[s, by * block_M : (by + 1) * block_M, n0 : n0 + block_N],

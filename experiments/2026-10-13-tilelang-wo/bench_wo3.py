@@ -1,4 +1,4 @@
-"""bench_wo.py for the fused cast and fused inverse RoPE (vLLM wo-rope-fused f806f5103): Port B1: the attention's WO projection at TP4 (16 heads x 512 in 2 groups, rank 1024,
+"""bench_wo.py for the fused cast and fused inverse RoPE (vLLM wo-rope-fused 2d1c6b2a2): Port B1: the attention's WO projection at TP4 (16 heads x 512 in 2 groups, rank 1024,
 hidden 5120), B12X's fused wo_projection.run_inv_rope (prepared per decode row count and
 for prefill, as the attention prepares it) against TileLangWOProjection (inverse RoPE in
 place, grouped WO-A, WO-B).
