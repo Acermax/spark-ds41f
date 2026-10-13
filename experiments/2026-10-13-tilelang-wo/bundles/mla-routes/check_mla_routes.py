@@ -119,17 +119,22 @@ def check(heads, idx_width, seed, rows=1024, swa_width=128, page=128):
     return bad, plan
 
 
-failures, shown = 0, False
-for heads in (16, 24):
-    for idx_width in (0, 512):
-        for seed in (1, 2, 3):
-            bad, plan = check(heads, idx_width, seed)
-            failures += bad
-            if bad and not shown:
-                shown = True
-                for name, kernel in plan.kernels.items():
-                    print(f"--- {name}: arithmetic lines")
-                    for line in arithmetic_lines(kernel):
-                        print("   ", line[:200])
-print(f"{'PASS' if not failures else 'FAIL'}: {failures} differing route pairs")
-sys.exit(1 if failures else 0)
+def main():
+    failures, shown = 0, False
+    for heads in (16, 24):
+        for idx_width in (0, 512):
+            for seed in (1, 2, 3):
+                bad, plan = check(heads, idx_width, seed)
+                failures += bad
+                if bad and not shown:
+                    shown = True
+                    for name, kernel in plan.kernels.items():
+                        print(f"--- {name}: arithmetic lines")
+                        for line in arithmetic_lines(kernel):
+                            print("   ", line[:200])
+    print(f"{'PASS' if not failures else 'FAIL'}: {failures} differing route pairs")
+    sys.exit(1 if failures else 0)
+
+
+if __name__ == "__main__":
+    main()
