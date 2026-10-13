@@ -111,4 +111,4 @@
 ../../2026-10-12-r6h/vllm/0115-TileLang-V4.1-mHC-split-fn-into-its-TF32-parts-while.patch
 ../../2026-10-12-r6h/vllm/0116-TileLang-V4.1-MoE-request-the-shared-row-before-the-.patch
 ../../2026-10-12-r6h/vllm/0117-TileLang-V4.1-vocabulary-heads-token-tiles-vary-fast.patch
-0118-TileLang-V4.1-name-every-kernel-after-what-it-comput.patch
+0118-TileLang-V4.1-name-every-kernel-after-its-file-and-w.patch
