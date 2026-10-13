@@ -83,6 +83,27 @@ def _native_linear(layer):
 _PRIVATE_WO: dict = {}
 
 
+def _trace_sp_sum(prefix, positions, sp_rows, result) -> None:
+    """DEBUG ONLY: this rank's rows of an SP WO result, summed in rank order."""
+    if not row_trace.enabled():
+        return
+    if result.dim() == 3:  # unreduced (N, L, hidden) parts
+        from vllm.models.deepseek_v4_1.tilelang.collectives import RankOrderParts
+
+        result = RankOrderParts(result).sum()
+    real, start = sp_rows.real_rows, sp_rows.start
+    row_trace.record(
+        prefix, "ar", positions[start : start + real], result[:real], row0=start
+    )
+
+
+def _tilelang_wo() -> bool:
+    """DEBUG ONLY: the TileLang WO unless VLLM_DS41_WO_DEBUG names b12x."""
+    return kernels.uses_tilelang() and "b12x" not in os.environ.get(
+        "VLLM_DS41_WO_DEBUG", ""
+    )
+
+
 def _scratch(plan):
     return current_workspace_manager().get_simultaneous(
         *((s.shape, s.dtype) for s in plan.scratch_specs())
@@ -261,7 +282,7 @@ class _AttentionHelpers:
             requests=tuple(requests),
             stage="weights",
         )
-        if kernels.uses_tilelang():  # the TileLang WO projection needs no plan
+        if _tilelang_wo():  # the TileLang WO projection needs no plan
             return (helpers,)
         return (helpers, attn._wo_preparation_unit(workload))
 
@@ -1383,8 +1404,6 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase):
         tracing = row_trace.enabled()
         if tracing:
             row_trace.begin(self.prefix, self.is_draft)
-            if sp_rows is None:
-                row_trace.record(self.prefix, "in", positions, hidden_states)
         index_weights = None
         if sp_rows is not None and self.compressor is None:
             # Sequence-parallel prefill without a compressor: the row-wise front
@@ -1401,6 +1420,9 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase):
             else:
                 parts = [sp_rows.gather(part) for part in parts]
             qr, kv = parts[0].contiguous(), parts[1].contiguous()
+            if tracing:
+                row_trace.record(self.prefix, "qr", positions, qr)
+                row_trace.record(self.prefix, "kv", positions, kv)
             if self.indexer is not None:
                 index_weights = parts[2].contiguous()
             hidden_states = None
@@ -1409,6 +1431,8 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase):
             if sp_rows is not None:
                 # Sequence-parallel prefill: attention runs on every row.
                 hidden_states = sp_rows.gather(hidden_states)
+            if tracing:
+                row_trace.record(self.prefix, "in", positions, hidden_states)
             rows = hidden_states.shape[0]
             qr_kv, _ = self.fused_wqa_wkv(hidden_states)
             qr, kv = qr_kv.split((self.q_lora_rank, 512), dim=-1)
@@ -2001,7 +2025,7 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase):
                     f"V4.1 {name} shape mismatch: expected {shape}, "
                     f"got {tuple(tensor.shape)}"
                 )
-        if kernels.uses_tilelang():
+        if _tilelang_wo():
             from vllm.models.deepseek_v4_1.tilelang.wo import TileLangWOProjection
 
             # The checkpoint tensors in place, no packing.
@@ -2156,8 +2180,12 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase):
                 self._wo_projection_weights(
                     o[start:stop], positions[start:stop], cache, out
                 )
+                if row_trace.enabled():
+                    row_trace.record(
+                        self.prefix, "wo", positions[start:stop], out, row0=start
+                    )
 
-            return sp_rows.project_reduce_scatter(
+            result = sp_rows.project_reduce_scatter(
                 project,
                 (hidden,),
                 torch.bfloat16,
@@ -2165,6 +2193,8 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase):
                 slices=1 if "noslice" in debug else sp_prefill.wo_slices(rows),
                 then=lambda: l2_prefetch.issue(self._l2pf_ffn, rows),
             )
+            _trace_sp_sum(self.prefix, positions, sp_rows, result)
+            return result
         local = torch.empty((rows, hidden), dtype=torch.bfloat16, device=o.device)
         if "privateall" in debug:
             key = (o.device, self.is_draft)
@@ -2185,7 +2215,7 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase):
         return local
 
     def _o_proj(self, o, positions, *, is_prefill=False, sp_rows=None):
-        if kernels.uses_tilelang():
+        if _tilelang_wo():
             return self._o_proj_tilelang(o, positions, sp_rows)
         from b12x.preparation import require_prepared
 
@@ -2238,9 +2268,13 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase):
                 )
                 if done.data_ptr() != out.data_ptr():
                     raise RuntimeError("V4.1 WO projection ignored its output")
+                if row_trace.enabled():
+                    row_trace.record(
+                        self.prefix, "wo", positions[start:stop], out, row0=start
+                    )
 
             retain_cuda_graph_capture_resource(scratch)
-            return sp_rows.project_reduce_scatter(
+            result = sp_rows.project_reduce_scatter(
                 project,
                 (hidden,),
                 torch.bfloat16,
@@ -2249,6 +2283,8 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase):
                 slices=sp_prefill.wo_slices(rows) if kernels.uses_tilelang() else 1,
                 then=lambda: l2_prefetch.issue(self._l2pf_ffn, rows),
             )
+            _trace_sp_sum(self.prefix, positions, sp_rows, result)
+            return result
         # The custom attention result must outlive reuse of the workspace arena.
         if sp_rows is None:
             output = torch.empty_strided(
@@ -2281,6 +2317,11 @@ class DeepseekV4Attention(nn.Module, AttentionLayerBase):
             if local.data_ptr() != padded.data_ptr():
                 raise RuntimeError("V4.1 WO projection ignored its padded output")
             return sp_rows.reduce_scatter(padded)
+        tracing = row_trace.enabled()
+        if tracing:
+            row_trace.record(self.prefix, "wo", positions, local)
         if get_tensor_model_parallel_world_size() > 1:
             local = get_tp_group().all_reduce(local)
+        if tracing:
+            row_trace.record(self.prefix, "ar", positions, local)
         return local

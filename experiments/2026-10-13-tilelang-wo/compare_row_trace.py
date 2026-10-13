@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
-"""Where a prompt's prefill rows first differ between its own step and a shared one.
+"""Where a prompt's prefill rows first differ between its own forward and a shared one.
 
 usage: compare_row_trace.py TRACE_DIR
 
-Reads the step files of a VLLM_DS41_ROW_TRACE run (vLLM branch wo-row-trace, DEBUG
-ONLY): per forward, every attention layer's row hashes at four stages, with the
-rows' positions: "in" (the layer's input), "o" (attention output, before WO), "wo"
-(this rank's WO partial, before the TP sum) and "ar" (after it). A prompt's prefill
-is the run of rows at positions 0, 1, ... in a forward; prompts are told apart by
-their first layer's input hashes. For each prompt prefilled both alone (the forward
-holds only its rows) and beside other rows, prints the first (layer, stage) whose
-hashes differ, in execution order, and the shared forward's size.
+Reads a VLLM_DS41_ROW_TRACE run (vLLM branch wo-row-trace, DEBUG ONLY): one directory
+per TP rank (``rank<r>``, or the step files directly for a rank-0-only trace), and per
+forward every attention layer's row hashes with the rows' positions, at these stages:
+"in" (the layer's input; gathered in sequence-parallel steps), "qr"/"kv" (the gathered
+projections, sequence-parallel layers without a compressor), "o" (attention output,
+before WO), "wo" (this rank's WO partial, before the TP sum) and "ar" (after it; in a
+sequence-parallel step only this rank's rows, from row ``row0``).
+
+A prompt's prefill is a run of rows at positions 0, 1, ... in a forward; prompts are
+told apart by the first target layer's attention output over the run. For each prompt
+prefilled both alone and beside other rows, prints the first (layer, stage) whose
+hashes differ on the rows both forwards recorded, in the alone forward's order.
 
 Standard library only.
 """
@@ -20,79 +24,87 @@ import pickle
 import sys
 
 
-def prefill_run(positions):
-    """(start, length) of the rows at positions 0, 1, ...; None if no row is at 0."""
-    try:
-        start = positions.index(0)
-    except ValueError:
-        return None
-    length = 1
-    while start + length < len(positions) and positions[start + length] == length:
-        length += 1
-    return start, length
+def runs(positions):
+    """(start, length) of every run of rows at positions 0, 1, ..."""
+    found, i = [], 0
+    while i < len(positions):
+        if positions[i] == 0:
+            n = 1
+            while i + n < len(positions) and positions[i + n] == n:
+                n += 1
+            found.append((i, n))
+            i += n
+        else:
+            i += 1
+    return found
 
 
-def load(path):
-    with open(path, "rb") as f:
-        return pickle.load(f)
+def first_output(records):
+    return next(r for r in records if r[1] == "o")
+
+
+def compare_rank(directory):
+    steps = []
+    for path in sorted(glob.glob(os.path.join(directory, "step-*.pkl"))):
+        with open(path, "rb") as f:
+            steps.append((os.path.basename(path), pickle.load(f)))
+    alone = {}
+    for name, records in steps:
+        o = first_output(records)
+        found = runs(o[2])
+        if len(found) == 1 and found[0] == (0, len(o[2])):
+            alone.setdefault(tuple(o[3]), (name, records))
+    lines = []
+    for name, records in steps:
+        o = first_output(records)
+        found = runs(o[2])
+        if len(found) == 1 and found[0] == (0, len(o[2])):
+            continue
+        index = {}
+        for r in records:
+            index.setdefault((r[0], r[1]), []).append(r)
+        for start, n in found:
+            ref = alone.get(tuple(o[3][start : start + n]))
+            if ref is None:
+                continue
+            result = first_difference(ref[1], index, start, n)
+            sp = o[4].get("sp")
+            lines.append(f"  {name} ({len(o[2])} rows, sp={sp}) run at {start} ({n} rows) "
+                         f"against {ref[0]}: {result}")
+    return lines
+
+
+def first_difference(ref, index, start, n):
+    seen = {}
+    compared = 0
+    for prefix, stage, _, hashes, _ in ref:
+        k = seen.get((prefix, stage), 0)
+        seen[(prefix, stage)] = k + 1
+        candidates = index.get((prefix, stage), [])
+        if k >= len(candidates) or len(hashes) != n:
+            continue
+        _, _, positions, other, meta = candidates[k]
+        row0 = meta.get("row0", 0)
+        lo, hi = max(start, row0), min(start + n, row0 + len(other))
+        if lo >= hi:
+            continue
+        if any(positions[row - row0] != row - start for row in range(lo, hi)):
+            continue  # this record's rows are not the run's (compacted layout)
+        compared += 1
+        diff = [row - start for row in range(lo, hi) if hashes[row - start] != other[row - row0]]
+        if diff:
+            return (f"{prefix} {stage}: {len(diff)} of {hi - lo} rows differ "
+                    f"(first at position {diff[0]}; {compared} records equal before)")
+    return f"identical ({compared} records compared)"
 
 
 def main():
     trace = sys.argv[1]
-    steps = []
-    for path in sorted(glob.glob(os.path.join(trace, "step-*.pkl"))):
-        records = load(path)
-        first = records[0]
-        run = prefill_run(first[2])
-        if run is None:
-            continue
-        start, length = run
-        key = tuple(first[3][start : start + length])
-        steps.append((os.path.basename(path), key, len(first[2]), records))
-    by_key = {}
-    for name, key, rows, records in steps:
-        by_key.setdefault(key, []).append((name, rows, records))
-    print(f"{len(steps)} forwards with a prefill, {len(by_key)} distinct prompts")
-    for key, group in by_key.items():
-        alone = [g for g in group if g[1] == len(key)]
-        shared = [g for g in group if g[1] != len(key)]
-        if not alone or not shared:
-            continue
-        ref_name, _, ref = alone[0]
-        for other_name, _, other in alone[1:]:
-            if first_difference(ref, other) is not None:
-                print(f"  prompt of {len(key)} rows: alone {ref_name} and {other_name} differ")
-        for name, rows, records in shared:
-            diff = first_difference(ref, records)
-            meta = next((r[4] for r in records if r[1] == "o"), {})
-            where = "identical" if diff is None else diff
-            print(f"  prompt of {len(key)} rows: {name} ({rows} rows, sp={meta.get('sp')}) "
-                  f"against {ref_name}: {where}")
-
-
-def first_difference(ref, other):
-    """The first (prefix, stage) whose prefill-run hashes differ, in ref's order."""
-    index = {}
-    for prefix, stage, positions, hashes, _ in other:
-        index.setdefault((prefix, stage), []).append((positions, hashes))
-    seen = {}
-    for prefix, stage, positions, hashes, _ in ref:
-        n = seen.get((prefix, stage), 0)
-        seen[(prefix, stage)] = n + 1
-        candidates = index.get((prefix, stage), [])
-        if n >= len(candidates):
-            return f"{prefix} {stage}: missing in the shared forward"
-        run_a, run_b = prefill_run(positions), prefill_run(candidates[n][0])
-        if run_a is None or run_b is None:
-            continue
-        a = hashes[run_a[0] : run_a[0] + run_a[1]]
-        b = candidates[n][1][run_b[0] : run_b[0] + run_b[1]]
-        if run_a[1] != run_b[1]:
-            return f"{prefix} {stage}: run lengths {run_a[1]} vs {run_b[1]}"
-        rows = [i for i, (x, y) in enumerate(zip(a, b)) if x != y]
-        if rows:
-            return f"{prefix} {stage}: {len(rows)} of {len(a)} rows differ (first at position {rows[0]})"
-    return None
+    ranks = sorted(glob.glob(os.path.join(trace, "rank*"))) or [trace]
+    for directory in ranks:
+        print(os.path.basename(directory.rstrip("/")))
+        for line in compare_rank(directory):
+            print(line)
 
 
 if __name__ == "__main__":
