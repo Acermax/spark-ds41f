@@ -184,3 +184,12 @@ compiler lowers extend's in-kernel segment fold (vectorized `fma2`, paired `exp2
 reciprocal differently from decode's combine kernel. [bundles/mla-ieee](bundles/mla-ieee)
 ([mla-ieee.json](mla-ieee.json)) runs the route check and times each route
 ([time_mla.py](time_mla.py)) with fast math on and off.
+
+### IEEE math (2026-10-13, 18:41-18:44 UTC)
+
+**Not the cause**: with fast math off the routes still differ (16 heads: none in three seeds;
+24 heads: 3-4 elements per 1024 rows, all in rows with at most 8 keys), and no route is
+measurably faster or slower either way (TP4 SWA-only: 12.4 / 28.7-30.8 / 73-75 us at 1 / 96 /
+263 rows). The extend kernel computes something its source does not share with decode.
+[bundles/mla-source](bundles/mla-source) prints both kernels' generated source and checks
+rows with exactly one, two and three keys.
