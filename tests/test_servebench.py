@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from servebench import __main__ as cli  # noqa: E402
-from servebench import client, load, prom, prompts, report, stats  # noqa: E402
+from servebench import client, engine, load, prom, prompts, report, stats  # noqa: E402
 
 CHUNK_TOKENS = 2      # tokens per streamed chunk (a "step" of the fake engine)
 CHUNK_DELAY_S = 0.004
@@ -23,7 +23,9 @@ CHUNK_DELAY_S = 0.004
 class FakeServer:
     """Streams max_tokens / 2 chunks of two tokens each; counts steps and tokens."""
 
-    def __init__(self):
+    def __init__(self, step_scale: float = 1.0):
+        self.step_scale = step_scale  # engine grid: multiplies every step time
+        self.resets = 0
         self.lock = threading.Lock()
         self.counters = {"generation": 0, "steps": 0, "step_tokens": 0, "drafts": 0, "accepted": 0}
         fake = self
@@ -34,7 +36,7 @@ class FakeServer:
 
             def do_GET(self):
                 if self.path == "/v1/models":
-                    body = json.dumps({"data": [{"id": "fake-model"}]}).encode()
+                    body = json.dumps({"data": [{"id": "fake-model", "max_model_len": 1048576}]}).encode()
                 elif self.path == "/metrics":
                     with fake.lock:
                         c = dict(fake.counters)
@@ -56,6 +58,28 @@ class FakeServer:
 
             def do_POST(self):
                 request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                if self.path in ("/collective_rpc", "/reset_prefix_cache"):
+                    if self.path == "/reset_prefix_cache":
+                        fake.resets += 1
+                        body = b""
+                    else:
+                        spec = json.loads(request["args"][0])
+                        workers = []
+                        for rank in (0, 1):
+                            shapes = []
+                            for i, shape in enumerate(spec["shapes"]):
+                                base = fake.step_scale * (10 + shape["num_tokens"] / 10 + shape["context_len"] / 1e5)
+                                samples = [base * (1 + 0.002 * ((k * 7 + i) % 5 - 2)) for k in range(spec["replays"])]
+                                shapes.append({"shape": shape, "step_ms": samples,
+                                               "forward_ms": [v * 0.8 for v in samples],
+                                               "drafter_ms": [v * 0.2 for v in samples], "modes": []})
+                            workers.append({"rank": rank, "replays": spec["replays"], "shapes": shapes})
+                        body = json.dumps({"results": workers}).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 per_chunk = request.get("stream_options", {}).get("continuous_usage_stats", False)
                 total = request["max_tokens"]
                 self.send_response(200)
@@ -207,6 +231,49 @@ class LiveTest(unittest.TestCase):
             self.assertIn("output tok/s", metrics)
             self.assertIn("engine steps/s", metrics)
             self.assertIn("output tokens/step", metrics)
+
+
+class EngineTest(unittest.TestCase):
+    def test_default_grid_reaches_the_longest_context(self):
+        shapes = engine.default_shapes(drafts=5, max_context=1048576)
+        labels = [engine.label(s) for s in shapes]
+        self.assertIn("decode 16x96 rows @4K", labels)
+        self.assertIn("decode 1x6 rows @1016K", labels)  # 8K below the 1M maximum
+        self.assertIn("prefill 8192 @256K", labels)
+        self.assertNotIn("decode 1x6 rows @1016K", [engine.label(s) for s in engine.default_shapes(5, 262144)])
+
+    def test_grid_run_summary_and_compare(self):
+        fast, slow = FakeServer(1.0), FakeServer(1.05)
+        try:
+            runs = []
+            for server in (fast, slow):
+                shapes = engine.default_shapes(5, engine.max_model_len(server.url))
+                raw = engine.run(server.url, shapes, replays=12)
+                self.assertTrue(raw["prefix_cache_reset"])
+                self.assertEqual(server.resets, 1)
+                self.assertEqual(raw["rank"], 0)
+                runs.append({"engine": engine.summarize(raw)})
+            row = runs[0]["engine"][0]
+            self.assertEqual(row["step_ms"]["n"], 12)
+            self.assertLess(row["step_ms"]["ci95_pct"], 0.5)
+            self.assertIn("forward_ms", row)
+            result = engine.compare(runs[0], runs[1])
+            self.assertEqual({r["verdict"] for r in result["rows"]}, {"worse"})
+            self.assertAlmostEqual(result["rows"][0]["change_pct"], 5.0, places=1)
+        finally:
+            fast.close()
+            slow.close()
+
+    def test_grid_refuses_a_busy_server(self):
+        busy = FakeServer()
+        try:
+            original = prom.scrape
+            prom.scrape = lambda url, names, timeout=10.0: {"requests_running": 2.0}
+            with self.assertRaises(RuntimeError):
+                engine.run(busy.url, engine.default_shapes(), replays=2)
+        finally:
+            prom.scrape = original
+            busy.close()
 
 
 class CompareTest(unittest.TestCase):
