@@ -59,3 +59,21 @@ scale 2.0 and production's cost curves (`ring4-r6h-headout-20261012`). That is r
 cost scale 1.0 losing at eight prompts, so it stays out. r6j / r6h / r6j again, queued on
 dgx1 behind the image job so it runs unattended; the queue restores production (r6h) when
 it is done.
+
+### First attempt (2026-10-13, 04:19-07:24 UTC): the prefetch was off
+
+The image gate passed on bits and names (no `main_kernel` left; the profile showed
+`moe_grouped_fp8_fp4_gemm_kernel`, `gemm_mxfp8_kernel`, `sparse_mla_kernel`,
+`mhc_project_streams_kernel`, `vocab_packed_projection_kernel`, ... and sparknet's
+`oneshot_allreduce_kernel`). The release comparison then read r6j 5.5-7.5% slower than
+r6h on every decode measure (paired sweep -7.4%, eight prompts -5.5%), with acceptance and
+prefill unchanged, in both r6j arms.
+
+Cause: the patch moved the TileLang prefetch file but its amend left out the launcher's
+import change, so the launcher could not import the kernel, logged a warning and served
+with no L2 prefetch at all (the profile had no prefetch kernel). Fixed in 0118, and vLLM
+[0119](vllm/0119-L2-prefetch-refuse-to-run-without-the-TileLang-kerne.patch) makes an
+explicitly requested TileLang prefetch that fails to compile stop the start instead of
+disabling itself. Checked in a GPU container on the r6j image with the corrected file:
+"TileLang kernel ready". New head `004b7cb75fdf`, tree `c4d86d34146d`; the image job and
+the release comparison run again.

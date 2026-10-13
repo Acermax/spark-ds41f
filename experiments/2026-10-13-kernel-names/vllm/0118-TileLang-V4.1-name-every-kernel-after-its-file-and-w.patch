@@ -1,8 +1,8 @@
-From a1e27dce22d844da2e860643adb116c9f85ad7cd Mon Sep 17 00:00:00 2001
+From 3ea440a851c02ffe7037ef09ebf865222984825a Mon Sep 17 00:00:00 2001
 From: Christopher Owen <3221756+christopherowen@users.noreply.github.com>
 Date: Tue, 13 Oct 2026 05:52:17 +0200
-Subject: [PATCH] TileLang V4.1: name every kernel after its file and what it
- computes
+Subject: [PATCH 118/119] TileLang V4.1: name every kernel after its file and
+ what it computes
 
 TileLang names a CUDA kernel after its prim_func, and most of ours were
 called main, so every profile and SASS dump showed main_kernel and kernels
@@ -18,7 +18,7 @@ family-directory layout as deepseek_v4_1/tilelang/; its test follows. Only
 symbols and that path change; the generated code and the results are the
 same.
 ---
- ... => test_glm5next_tilelang_l2_prefetch.py} |  0
+ ... => test_glm5next_tilelang_l2_prefetch.py} |  4 +-
  .../deepseek_v4_1/tilelang/activation.py      |  4 +-
  .../deepseek_v4_1/tilelang/cache_writer.py    |  4 +-
  .../deepseek_v4_1/tilelang/collectives.py     |  8 +--
@@ -31,17 +31,39 @@ same.
  vllm/models/deepseek_v4_1/tilelang/router.py  |  4 +-
  .../deepseek_v4_1/tilelang/sparse_mla.py      | 16 +++---
  vllm/models/deepseek_v4_1/tilelang/vocab.py   |  4 +-
+ vllm/models/glm5next/nvidia/l2_prefetch.py    |  4 +-
  .../glm5next/nvidia/tilelang/__init__.py      |  3 +
  .../l2_prefetch.py}                           |  0
- 15 files changed, 97 insertions(+), 94 deletions(-)
- rename tests/models/{test_glm5next_l2_prefetch_tilelang.py => test_glm5next_tilelang_l2_prefetch.py} (100%)
+ 16 files changed, 101 insertions(+), 98 deletions(-)
+ rename tests/models/{test_glm5next_l2_prefetch_tilelang.py => test_glm5next_tilelang_l2_prefetch.py} (93%)
  create mode 100644 vllm/models/glm5next/nvidia/tilelang/__init__.py
  rename vllm/models/glm5next/nvidia/{l2_prefetch_tilelang.py => tilelang/l2_prefetch.py} (100%)
 
 diff --git a/tests/models/test_glm5next_l2_prefetch_tilelang.py b/tests/models/test_glm5next_tilelang_l2_prefetch.py
-similarity index 100%
+similarity index 93%
 rename from tests/models/test_glm5next_l2_prefetch_tilelang.py
 rename to tests/models/test_glm5next_tilelang_l2_prefetch.py
+index dbd3affa2..dc73eced8 100644
+--- a/tests/models/test_glm5next_l2_prefetch_tilelang.py
++++ b/tests/models/test_glm5next_tilelang_l2_prefetch.py
+@@ -17,7 +17,7 @@ def _plan(*tensors):
+ 
+ 
+ def test_tilelang_prefetch_leaves_data_unchanged():
+-    from vllm.models.glm5next.nvidia.l2_prefetch_tilelang import compile_launcher
++    from vllm.models.glm5next.nvidia.tilelang.l2_prefetch import compile_launcher
+ 
+     launch = compile_launcher(grid=2, block=128, chunk=4096)
+     # Sizes that end mid-chunk and below the 16-byte granule.
+@@ -36,7 +36,7 @@ def test_tilelang_prefetch_leaves_data_unchanged():
+ 
+ 
+ def test_tilelang_prefetch_captures_in_a_graph():
+-    from vllm.models.glm5next.nvidia.l2_prefetch_tilelang import compile_launcher
++    from vllm.models.glm5next.nvidia.tilelang.l2_prefetch import compile_launcher
+ 
+     launch = compile_launcher(grid=2, block=128, chunk=4096)
+     w = torch.randn(8 * 1024 * 1024, device="cuda")
 diff --git a/vllm/models/deepseek_v4_1/tilelang/activation.py b/vllm/models/deepseek_v4_1/tilelang/activation.py
 index 6699d1abb..92d7ebdd8 100644
 --- a/vllm/models/deepseek_v4_1/tilelang/activation.py
@@ -871,6 +893,28 @@ index f3c02e967..7f5cc8403 100644
  
  
  _OUT = {torch.bfloat16: T.bfloat16, torch.float32: T.float32}
+diff --git a/vllm/models/glm5next/nvidia/l2_prefetch.py b/vllm/models/glm5next/nvidia/l2_prefetch.py
+index 2f246bff2..4a19dec8a 100644
+--- a/vllm/models/glm5next/nvidia/l2_prefetch.py
++++ b/vllm/models/glm5next/nvidia/l2_prefetch.py
+@@ -247,7 +247,7 @@ _compile_failed = False
+ 
+ 
+ # Kernel family: "cute" (CuTe DSL, the default) or "tilelang"
+-# (l2_prefetch_tilelang.py: same work split and PTX).
++# (tilelang/l2_prefetch.py: same work split and PTX).
+ _KERNELS = os.environ.get("VLLM_L2_PREFETCH_KERNELS", "cute").strip().lower()
+ 
+ 
+@@ -261,7 +261,7 @@ def _get_launcher():
+         return None
+     if _KERNELS == "tilelang":
+         try:
+-            from vllm.models.glm5next.nvidia.l2_prefetch_tilelang import compile_launcher
++            from vllm.models.glm5next.nvidia.tilelang.l2_prefetch import compile_launcher
+ 
+             _compiled = compile_launcher(_GRID, _BLOCK, _CHUNK_BYTES)
+             logger.info(
 diff --git a/vllm/models/glm5next/nvidia/tilelang/__init__.py b/vllm/models/glm5next/nvidia/tilelang/__init__.py
 new file mode 100644
 index 000000000..65f836b53

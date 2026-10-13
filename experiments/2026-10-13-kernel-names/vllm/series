@@ -112,3 +112,4 @@
 ../../2026-10-12-r6h/vllm/0116-TileLang-V4.1-MoE-request-the-shared-row-before-the-.patch
 ../../2026-10-12-r6h/vllm/0117-TileLang-V4.1-vocabulary-heads-token-tiles-vary-fast.patch
 0118-TileLang-V4.1-name-every-kernel-after-its-file-and-w.patch
+0119-L2-prefetch-refuse-to-run-without-the-TileLang-kerne.patch
