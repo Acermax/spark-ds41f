@@ -295,3 +295,24 @@ attention output go: decode WO is two kernels on the in-kernel path, three on th
 path (B12X: one). [bundles/wo-rope](bundles/wo-rope) ([wo-rope.json](wo-rope.json)): the
 tests (the cast bytes equal `per_token_cast` of WO-A on `rope_`'s output, and the input
 is not written), invariance, [bench_wo3.py](bench_wo3.py).
+
+### Fixed-row profile (2026-10-13, 20:39-20:46 UTC)
+
+Kernel time per step, adaptive verification off, rank 0, r6j -> fused (154 target steps each;
+the step mix differs a little because the text does):
+
+| workload | span ms/step | kernel ms/step | WO (B12X dense + its RoPE -> TileLang WO-A + WO-B + RoPE) |
+| --- | ---: | ---: | --- |
+| code16 (96 rows) | 45.20 -> 45.30 | 52.47 -> 52.63 | 1.65 -> ~1.70 ms/step (level, -3%) |
+| c8 (48 rows) | 29.94 -> 31.67 | 32.77 -> 34.86 | +0.17 ms/step; the rest is MoE routing of a different text (+0.87) |
+| prefill 16K (window) | 2808 vs 2799 | **2774 vs 2799** | WO ~5 ms cheaper; NCCL waits 34 ms shorter |
+
+At prefill the candidate's kernels take 25 ms less but the window is 9 ms longer: the time
+is in gaps, not GPU work. At decode the WO is level at 96 rows and slower at 48, where the
+kernel bench put TileLang at 1.12-1.39x warm.
+
+### Inverse RoPE in WO-A: dropped
+
+- **f806f5103 did not compile.** It rotated `A_shared` in place after its copy, and TileLang's pipeline planner allows one write per stage.
+- **2d1c6b2a2 compiles and is correct, but far slower.** It copies to a raw tile and rotates as the tile moves to `A_shared`. The 14 WO tests pass, including the fused bytes against `rope_` + WO-A + `per_token_cast`, and invariance passes. But that elementwise pass runs over every K block: WO-A at 96 rows 29 -> 160 us, at 2048 rows 453 -> 2563 us.
+- **Not pursued further.** Rotating only the RoPE block needs the K loop split per head, too much for ~4 us a decode step. r6k keeps the fused cast without it.
