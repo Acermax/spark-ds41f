@@ -32,3 +32,26 @@ past 64 rows it takes the 128 x 128 prefill tile: in the WO window
    and WO-B shapes, 1-8192 rows; time per call of both.
 2. [sweep_fp8_decode.py](sweep_fp8_decode.py): WO-B's decode tile per height (16, 32,
    64, 96, 128) against today's path, warm and cold, bits against the prefill GEMM.
+
+### Window 1 results (2026-10-13, 16:45-16:48 UTC)
+
+- **The fused kernel did not compile.** The cast loop reused the name of the scale-staging
+  loop's parallel index (`w`), which TileLang treats as immutable outside that loop; and
+  the hand-written pipeline stage list did not match the statements TileLang's planner
+  counts. Fixed in vLLM `e088944d1` and `3ef4c4752` (the planner stages the loop from
+  `num_stages`). Checked on dgx4 the same afternoon: **bit-identical** to
+  `per_token_cast` + `gemm_mxfp8` at the context-KV shape (one and five shards) and WO-B,
+  1-8192 rows.
+- **WO-B's decode tiles** (every candidate bit-identical to the prefill GEMM):
+
+  | rows | best tile | against today |
+  | --- | --- | ---: |
+  | 1-32 | today's | 1.00 |
+  | 48-64 | 64 rows, `block_N` 128, `block_K` 128, 2 stages | **0.87** |
+  | 72-96 | a 96-row tile, `block_N` 64, `block_K` 128, 2 stages | **0.91** |
+  | 112-128 | (128-row tile) | 1.08: keep the prefill tile |
+
+## Window 2 ([w2.json](w2.json), kernel only, dgx2)
+
+[sweep_gemm_cast.py](sweep_gemm_cast.py): the fused kernel's tiles at 256-8192 rows against
+production's cast + prefill GEMM, warm and cold, bits checked, at both shapes.
