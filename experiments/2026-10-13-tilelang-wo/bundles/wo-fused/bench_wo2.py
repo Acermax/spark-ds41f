@@ -80,12 +80,13 @@ def part_rope(rows):
 
 xq_mid = torch.empty((CAPACITY, GROUPS * RANK), dtype=torch.float8_e4m3fn, device=DEVICE)
 sf_mid = torch.empty((CAPACITY, GROUPS * RANK // 32), dtype=torch.uint8, device=DEVICE)
-partials_mid = torch.empty((4, 128, GROUPS * RANK), dtype=torch.float32, device=DEVICE)
+partials_flat = torch.empty(4 * 128 * GROUPS * RANK, dtype=torch.float32, device=DEVICE)
 
 
 def part_a(rows):
-    # WO-A with the reference's cast fused (MXFP8 out).
-    partials = partials_mid[:, :rows] if tilelang_wo.a.partial_specs(rows) else None
+    # WO-A with the reference's cast fused (MXFP8 out); split partials contiguous.
+    split = tilelang_wo.a.partial_specs(rows)
+    partials = partials_flat[: 4 * rows * GROUPS * RANK].view(4, rows, GROUPS * RANK) if split else None
     tilelang_wo.a(work[:rows].view(rows, -1), xq_mid[:rows], sf_mid[:rows], partials)
 
 
