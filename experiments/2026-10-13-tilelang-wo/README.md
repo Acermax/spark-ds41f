@@ -174,3 +174,13 @@ segment, 16 heads, 48 SMs) `split` to 48 rows, `decode` to 144, `extend` past th
 `extend` and different. The kernels are built with `TL_ENABLE_FAST_MATH`.
 [check_mla_routes.py](check_mla_routes.py) ([mla-routes.json](mla-routes.json)) compares
 the routes on 1024 rows with short and full key lists.
+
+### Route check (2026-10-13, 18:37-18:38 UTC)
+
+**Reproduced without the model.** On SWA-only layers `extend` differs from `decode` and
+`split` (which agree): 1-6 elements per 1024 rows at 16 and 24 heads, mostly in rows with at
+most 8 keys; indexed layers agree. The routes share their formulas; under fast math the
+compiler lowers extend's in-kernel segment fold (vectorized `fma2`, paired `exp2f`) and
+reciprocal differently from decode's combine kernel. [bundles/mla-ieee](bundles/mla-ieee)
+([mla-ieee.json](mla-ieee.json)) runs the route check and times each route
+([time_mla.py](time_mla.py)) with fast math on and off.
