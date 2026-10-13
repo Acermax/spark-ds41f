@@ -28,7 +28,7 @@ from kbench import (  # noqa: E402
 from b12x.gemm import wo_projection  # noqa: E402
 from b12x.preparation import PreparationSession, PreparedCall  # noqa: E402
 
-from vllm.models.deepseek_v4_1.tilelang.linear import _block32_gemm  # noqa: E402
+from vllm.models.deepseek_v4_1.tilelang.linear import _activation_specs, _block32_gemm  # noqa: E402
 from vllm.models.deepseek_v4_1.tilelang.rope import rope_  # noqa: E402
 from vllm.models.deepseek_v4_1.tilelang.wo import TileLangWOProjection  # noqa: E402
 from vllm.v1.worker.workspace import use_preallocated_workspace  # noqa: E402
@@ -91,7 +91,9 @@ def part_a(rows):
 
 
 def part_b(rows):
-    _block32_gemm(tilelang_wo.b, xq_mid, sf_mid, t_out[:rows], rows)
+    # The WO's own buffer height: whole decode tiles, or exactly the rows.
+    tile = _activation_specs(rows, GROUPS * RANK, tilelang_wo.b.tilelang_decode_rows)[0][0][0]
+    _block32_gemm(tilelang_wo.b, xq_mid[:tile], sf_mid[:tile], t_out[:rows], rows)
 
 
 weights = wo_projection.pack_weights(wo_a.weight, wo_a.weight_scale_inv, wo_b.weight, wo_b.weight_scale_inv,
