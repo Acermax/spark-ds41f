@@ -149,3 +149,17 @@ after the determinism fix, so the screen judges one change.
 
 [trace-raw.json](trace-raw.json) keeps layers 0 and 1's WO partials, the received parts
 and both sums raw (vLLM `wo-row-trace`), to recompute the sums offline.
+
+## Raw sums (2026-10-13, 18:00-18:05 UTC)
+
+[check_raw_sums.py](check_raw_sums.py) on the raw trace: every received part equals the
+partial its sender computed, and every SP sum equals the rank-order sum of its parts. The
+collectives are exact. The difference is earlier: on rank 2, layer 0's **attention output**
+for one row (row 2 of a 17-row prompt) differs between the 263-row SP forward and the
+prompt alone, whose three runs agree with each other; ranks 0, 1 and 3 are equal. The B12X
+WO's trace has the same row on rank 2 differing at layer 0. So SP prefill was never
+bit-identical in the attention; the B12X WO quantizes its input to FP8, which absorbed a
+one-ulp difference, and the TileLang WO keeps the reference's BF16 and passes it on.
+
+[trace-q.json](trace-q.json) records the query path (`qr`, `kv`, `q` after `wq_b`, `q`
+after RoPE) in every forward, raw for layers 0-1 in forwards up to 512 rows.

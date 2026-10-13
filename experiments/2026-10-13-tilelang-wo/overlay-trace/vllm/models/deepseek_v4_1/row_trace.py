@@ -55,7 +55,9 @@ def begin(prefix: str, is_draft: bool) -> None:
         flush()
 
 
-# Layers whose WO stages are also kept raw (BF16 bits), to recompute sums offline.
+# Forwards up to this many rows keep their RAW layers' stages raw (BF16 bits).
+RAW_ROWS = 512
+# Layers whose stages are also kept raw, to recompute them offline.
 RAW = tuple(
     f"layers.{n}.attn" for n in os.environ.get("VLLM_DS41_ROW_TRACE_RAW", "0,1").split(",")
 )
@@ -63,7 +65,7 @@ RAW = tuple(
 
 def raw(prefix: str, stage: str, positions: torch.Tensor, x: torch.Tensor, **meta) -> None:
     """``record`` plus the tensor's bits, for the RAW layers of the target."""
-    if not prefix.endswith(RAW) or "mtp" in prefix or "dspark" in prefix:
+    if not prefix.endswith(RAW) or x.shape[0] > RAW_ROWS:
         return
     data = x.detach().contiguous().view(torch.int16).cpu()
     meta = dict(meta, raw=data.numpy().tobytes(), shape=tuple(data.shape))
