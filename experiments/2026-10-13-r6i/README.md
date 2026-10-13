@@ -45,3 +45,38 @@ again. Each arm: `--wide` determinism, six samples of sixteen and eight differen
 prompts, four of four. All arms share the production cost curves, so the switches are
 the only variables. A release comparison against r6h follows if the full candidate is
 level or better everywhere.
+
+### Image (2026-10-12, 22:33-22:49 UTC)
+
+`vllm-ds41f-kkref:19f2c20ed4d6-r6i` (`sha256:91a9cd30ca5b`) built on dgx4 in 3.6 minutes
+(vLLM layers cached) and copied to every node. Gate: identical in every scenario with and
+without logprobs; references `7ae87256d3ea` and text digest `cd8f94c899d3`, as r6h.
+
+### Window 1 results (22:49-23:36 UTC)
+
+Every arm identical at temperature 0 with r6f's references. Different prompts at once,
+tok/s:
+
+| arm | 16 | 8 | 4 |
+| --- | ---: | ---: | ---: |
+| full (TileLang collectives, big-core proxy, TileLang prefetch) | 226.0 | 179.4 | 134.9 |
+| r6h | 225.1 | 179.2 | 134.9 |
+| sparknet main alone | 224.5 | 179.3 | 134.9 |
+| + TileLang collectives | 225.8 | 178.9 | 134.7 |
+| + big-core proxy | 225.0 | 179.2 | 134.8 |
+| full again | 225.3 | 179.6 | 135.0 |
+
+All level within the intervals (±0.2% at eight prompts, ±0.7-0.9% at sixteen). The
+probe's 3-5% collective gain and the placement's narrower spread do not show in
+serving throughput. r6i full is a migration step at r6h's speed and bits: no standalone
+CuTe DSL kernel left in the serving path.
+
+## Window 2 ([w2.json](w2.json)): adaptive verification's cost scale on real-row curves
+
+The cost scale 2.0 dates from padded-row cost curves, which priced a verified row at
+about 0.5 ms against about 6.5 ms on real rows (TODO, "Re-check verification pricing").
+Since r6g the curves are profiled on real rows, so 2.0 may double-count and verify too
+few drafts. The scale cannot change the output (it only sets how many drafts a step
+verifies). Arms on r6i full: 1.0, 2.0, 1.5, 1.0 again, each with the paired
+sixteen-prompt sweep (one stream) and sixteen, eight and four different prompts; then
+determinism on 1.0.
