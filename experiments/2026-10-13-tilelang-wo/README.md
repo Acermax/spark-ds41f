@@ -268,3 +268,21 @@ every size and offset. [bench_wo2.py](bench_wo2.py) against B12X's fused WO:
 TFLOP/s at every size; matching B12X, whose WO-A is FP8 (half the tensor work), rests on
 the rest of the pipeline. [fused.json](fused.json) ([overlay-fused](overlay-fused), vLLM
 `51c752bbd`) and [fused-screen.json](fused-screen.json): fused, r6j, fused again.
+
+### Fused screen (2026-10-13, 19:52-20:22 UTC)
+
+| against r6j | fused | fused again |
+| --- | ---: | ---: |
+| temperature 0 | identical, mixed15 0/0, **the retire arm's references** | identical |
+| quality | 5/5 | 5/5 |
+| sixteen different prompts | **+1.7%** | **+1.7%** |
+| four / eight | level / -0.8% | level / -0.7% |
+| paired sweep | level | level |
+| prefill 32K / 256K | level / -0.6% | level / -0.8% |
+
+The fused cast serves the same bits as the unfused WO and moves nothing measurable in serving.
+The candidate's text differs from r6j's (new references), so distinct-prompt and sweep
+numbers mix speed with acceptance (-1.4% +-5.2% accepted). [fused-fixed-profile.json](fused-fixed-profile.json)
+compares kernel time per step at fixed rows with adaptive verification off (code16: 96
+rows a step; c8: 48; one 16K prefill), fused first, using [analyze_costs.py](analyze_costs.py)
+with families for the TileLang kernel names.
