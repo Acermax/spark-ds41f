@@ -4,10 +4,10 @@
   "vllm": {
     "base_revision": "19f2c20ed4d64ae22bd009ceacadd85e2a81e354",
     "patch_series": "experiments/2026-10-13-kernel-names/vllm/series",
-    "patchset_sha256": "8651b3f3493ea09a94a65efcca275baf19bc253025e71c19ff373c19444733fe",
-    "expected_tree": "36e5acb9fa6a14c46cd867a1dcfef9e6e8434e72",
+    "patchset_sha256": "fd83c04087cf1c3f30ac71d16f467e770514251e8a24ef9d79545c05ba2b154a",
+    "expected_tree": "c4d86d34146d7ffb7caa0f334015d06f92bf882c",
     "verification": "bin/spark build prepare applies the series to the pinned revision and checks this patch head and tree; image label local.spark3.vllm.tree matches",
-    "patch_head": "1c82f93146fb4e640e43dd16553d581b724b6c1e",
+    "patch_head": "004b7cb75fdfd98a005d6b4978a1f3691ad83d4e",
     "capabilities": [
       "packed-bf16-lm-head",
       "streamed-vocabulary-weights",
@@ -40,7 +40,8 @@
       "mhc-split-while-loading",
       "moe-combine-early-shared-load",
       "vocab-head-token-tiles-fastest",
-      "tilelang-named-kernels"
+      "tilelang-named-kernels",
+      "tilelang-prefetch-fails-loudly"
     ]
   },
   "b12x": {
