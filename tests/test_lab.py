@@ -961,7 +961,7 @@ class StepFailureTest(unittest.TestCase):
                 mock.patch.object(lab, "plan_problems", return_value=[]), \
                 mock.patch.object(lab, "Telemetry", return_value=contextlib.nullcontext()), \
                 mock.patch.object(lab, "run_script") as script, \
-                mock.patch.object(lab.Path, "read_text", return_value='{"container": {"mounts": [], "image": "i"}}'), \
+                mock.patch.object(lab.spark, "read_cluster", return_value={"container": {"mounts": [], "image": "i"}}), \
                 mock.patch.object(lab, "production_configuration", return_value=(
                     {"host": {"home": "/h"}}, {"nodes": [{"name": "dgx1", "head": True, "management_ip": "1"}]}, {})), \
                 mock.patch.object(lab, "window_close", return_value=True) as close, \
@@ -970,6 +970,28 @@ class StepFailureTest(unittest.TestCase):
         self.assertEqual(code, 1)
         script.assert_not_called()
         self.assertIn("bench a exited 1", close.call_args.args[0])
+
+    def test_a_failed_boot_keeps_every_node_s_log(self) -> None:
+        spec = {"experiment": "experiments/x", "run": "t2",
+                "jobs": [{"kind": "measure", "profile": "lean", "arms": [{"config": "a.json", "label": "a"}]}]}
+        with mock.patch.object(lab, "read_hold", return_value={"holder": "test"}), \
+                mock.patch.object(lab, "hold_is_ours", return_value=True), \
+                mock.patch.object(lab, "window_should_close", return_value=None), \
+                mock.patch.object(lab, "beat"), \
+                mock.patch.object(lab, "fence_problems", return_value=[]), \
+                mock.patch.object(lab, "overlay_manifest", return_value=[]), \
+                mock.patch.object(lab, "boot", return_value=False), \
+                mock.patch.object(lab, "save_engine_logs") as saved, \
+                mock.patch.object(lab, "plan_problems", return_value=[]), \
+                mock.patch.object(lab.spark, "read_cluster", return_value={"container": {"mounts": [], "image": "i"}}), \
+                mock.patch.object(lab, "production_configuration", return_value=(
+                    {"host": {"home": "/h"}}, {"nodes": [{"name": "dgx1", "head": True, "management_ip": "1"}]}, {})), \
+                mock.patch.object(lab, "window_close", return_value=True) as close, \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            code = lab.execute(spec, dry=False, keep_open=True)
+        self.assertEqual(code, 1)
+        saved.assert_called_once_with("results/private/lab/t2/boot-a")
+        self.assertIn("boot of experiments/x/a.json failed", close.call_args.args[0])
 
     def test_the_lean_bench_does_not_override_its_live_check(self) -> None:
         self.assertNotIn("--allow-mismatch", lab.BENCH_BASE)
@@ -1088,3 +1110,18 @@ class ReleaseTP3ProfileTest(unittest.TestCase):
         self.assertNotIn("c16-distinct", stems)
         self.assertIn("c8-distinct", stems)
         self.assertEqual(lab.PROFILES["release-tp3"]["table"], "scripts/release_table.py")
+
+
+class OverlayArmTest(unittest.TestCase):
+    """The lab reads every arm resolved: an overlay arm has no container or serve_args of its own."""
+
+    def test_the_lab_reads_overlay_arms_resolved(self) -> None:
+        arm = lab.spark.read_cluster("experiments/2026-10-14-r6m/r6m-dev.json")
+        self.assertEqual(arm["container"]["image"], "vllm-ds41f-kkref:19f2c20ed4d6-r6m")
+        self.assertTrue(arm["container"]["mounts"])
+        profiled = {"extends": {"config": "experiments/2026-10-14-r6m/r6m-dev.json"},
+                    "set": {"serve_args": [*arm["serve_args"], "--profiler-config",
+                                           json.dumps({"torch_profiler_dir": "/cache/profile"})]}}
+        read = lab.spark.read_json
+        with mock.patch.object(lab.spark, "read_json", lambda path: profiled if path == "arm.json" else read(path)):
+            self.assertEqual(lab.profiler_dir("arm.json"), "/cache/profile")

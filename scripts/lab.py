@@ -1042,7 +1042,7 @@ def analyze(step: dict) -> dict:
     """analyze_trace4.py per node, the three nodes concurrently (cluster stopped: memory is free)."""
     if container_running():
         raise SystemExit("analysis needs the cluster stopped")
-    config = json.loads((ROOT / step["config"]).read_text())
+    config = spark.read_cluster(step["config"])
     image = config["container"]["image"]
     experiment = str(Path(step["config"]).parent)
     out = ROOT / step["out"]
@@ -1068,7 +1068,7 @@ def analyze(step: dict) -> dict:
 
 def profiler_dir(config_path: str) -> str:
     """The container's torch profiler directory, from the arm's --profiler-config."""
-    args = json.loads((ROOT / config_path).read_text())["serve_args"]
+    args = spark.read_cluster(config_path)["serve_args"]
     return json.loads(args[args.index("--profiler-config") + 1])["torch_profiler_dir"]
 
 
@@ -1129,7 +1129,7 @@ def profile_costs(step: dict) -> None:
     each arm against the first, rank by rank; the cluster is stopped, so memory is free."""
     if container_running():
         raise SystemExit("kernel summaries need the cluster stopped")
-    image = json.loads((ROOT / step["config"]).read_text())["container"]["image"]
+    image = spark.read_cluster(step["config"])["container"]["image"]
     experiment, out = ROOT / step["experiment"], ROOT / step["out"]
     names = [node["name"] for node in nodes_config()["nodes"]]
 
@@ -1222,7 +1222,7 @@ def save_curves(step: dict) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     rows = "padded"
     if step.get("config"):
-        environment = json.loads((ROOT / step["config"]).read_text()).get("environment", {})
+        environment = spark.read_cluster(step["config"]).get("environment", {})
         if environment.get("SPARK3_DSPARK_PROFILE_TOKENS") == "random":
             rows = "real"
     write_json_atomic(out, {"rows": rows, "verify": json.loads(found.group(1)),
@@ -1504,7 +1504,7 @@ def execute(spec: dict, dry: bool, keep_open: bool, close_on_failure: bool = Tru
         try:
             if step["kind"] == "boot":
                 if step["config"] not in checked:
-                    config = json.loads((ROOT / step["config"]).read_text())
+                    config = spark.read_cluster(step["config"])
                     problems = fence_problems(config["container"]["mounts"], config["container"]["image"], home)
                     if problems:
                         failed = "stale overlay: " + "; ".join(problems)
@@ -1523,6 +1523,8 @@ def execute(spec: dict, dry: bool, keep_open: bool, close_on_failure: bool = Tru
                     write_json_atomic(ROOT / step["memory_out"], snapshot)
                 if not boot(step["config"]):
                     failed = f"boot of {step['config']} failed"
+                    # A boot that dies keeps its evidence: the next boot replaces the containers.
+                    save_engine_logs(f"results/private/lab/{spec['run']}/boot-{step['label']}")
                     break
             elif step["kind"] == "cli":
                 # A bench refuses a cluster that differs from its arm; that ends the job.
