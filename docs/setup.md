@@ -10,12 +10,19 @@ changes](#what-changes-on-your-machines) before you start.
 
 ## Requirements and tested configurations
 
-| Sparks | Cabling | Profile | Context | Sequences | KV per rank | Kernel | Memory saver | Status |
-| --- | --- | --- | ---: | ---: | ---: | --- | --- | --- |
-| 3 | triangle | [config/cluster-4k.json](../config/cluster-4k.json) | 262,144 | 8 | 2.2 GiB | stock 4 KiB | not needed | supported fallback |
-| 3 | triangle | [config/cluster.json](../config/cluster.json) (= `cluster-64k.json`) | 524,288 | 8 | 3.5 GiB | 64 KiB | required | promoted |
-| 4 | ring | [config/cluster-tp4.json](../config/cluster-tp4.json) | 1,048,576 | 16 | 10.5 GiB | 64 KiB | required | promoted |
-| 2 | — | — | — | — | — | — | — | not supported |
+One recipe, [config/cluster.json](../config/cluster.json), serves every
+shape on one image; a shape changes only its cabling and its memory sizing.
+
+| Sparks | Cabling | Shape | Context | Sequences | KV per rank | Kernel | Memory saver |
+| --- | --- | --- | ---: | ---: | ---: | --- | --- |
+| 3 | triangle | `tp3-triangle-4k` | 262,144 | 8 | 2.2 GiB | stock 4 KiB | not needed |
+| 3 | triangle | `tp3-triangle` | 524,288 | 8 | 3.5 GiB | 64 KiB | required |
+| 4 | ring | `tp4-ring` | 1,048,576 | 16 | 10.5 GiB | 64 KiB | required |
+| 2 | — | — | — | — | — | — | — |
+
+A shape is qualified for the recipe's image when the recipe names its release
+benchmark (`benchmark_reference`); `cluster start` refuses an unqualified one
+unless given `--unqualified-shape`. Two Sparks are not supported.
 
 **Two Sparks** cannot hold this model with useful context. At three Sparks,
 the head node already runs within about 3 GiB of its memory guard during a
@@ -231,7 +238,7 @@ reboot:
 
 ## 2. Kernel (64 KiB profiles)
 
-Skip this stage for `config/cluster-4k.json`.
+Skip this stage for the `tp3-triangle-4k` shape.
 
 The 64 KiB profiles run Ubuntu's `7.0.0-1019-nvidia-64k` kernel with NVIDIA
 580.178.04 and the memory saver, a patched, signed `nvidia-uvm` DKMS module
@@ -304,7 +311,7 @@ Stop the service. On every node, put the retained 4 KiB entry in the pin
 file (`gnulinux-advanced-$uuid>gnulinux-7.0.0-1019-nvidia-advanced-$uuid`),
 run `sudo update-grub` and reboot. The memory service activates the original swap and leaves THP alone,
 and the memory saver is not built for the 4 KiB kernel, so stock UVM loads.
-Serve with `--cluster-config config/cluster-4k.json`. To remove everything,
+Serve the `tp3-triangle-4k` shape (`bin/spark site shape tp3-triangle-4k --apply`). To remove everything,
 follow the memory saver's [removal guide](https://github.com/christopherowen/dgx-spark-memory-saver/blob/main/docs/maintenance.md),
 disable `spark3-kernel-memory.service`, restore
 `/var/lib/spark3/kernel-64k-boot/fstab.before`, and delete `/swap-64k.img`
@@ -380,9 +387,11 @@ Two files describe your site and stay out of git:
   to the head (the `dgxN-internal` names in `/etc/hosts`) keeps large copies
   off a struggling LAN switch; the head's `known_hosts` must know that name.
   A node the head is not cabled to keeps its LAN route.
-- **The profile.** In the profile you will run (`config/cluster.json`, its
-  named copies, or `config/cluster-tp4.json`), set
-  `distributed.master_addr` to the head's management IP, `host.home`,
+- **The shape.** Name your cabling once: `bin/spark site shape tp3-triangle
+  --apply` (or `tp3-triangle-4k`, `tp4-ring`) writes the git-ignored
+  `config/site.json`, which `cluster sync` copies to every node. Every command
+  then resolves the recipe at that shape; `--shape NAME` overrides it.
+- **The recipe.** In `config/cluster.json`, set `distributed.master_addr` to the head's management IP, `host.home`,
   `deployment.repository` if you use a fork (the launch checks every node's
   `origin` against it), and the interface names in `GLOO_SOCKET_IFNAME`, `NCCL_SOCKET_IFNAME`,
   `TP_SOCKET_IFNAME` and `NCCL_IB_HCA`. Keep `distributed.master_port` below
@@ -393,9 +402,9 @@ Two files describe your site and stay out of git:
 `bin/spark --cluster-config <profile> cluster sync --apply` moves every node's checkout to the head's
 commit and copies the head's node map to the others.
 
-For any profile other than `config/cluster.json`, put `--cluster-config` before
-the subcommand of every command, for example
-`bin/spark --cluster-config config/cluster-tp4.json doctor`.
+Commands that change the nodes need the configuration named with
+`--cluster-config` before the subcommand, for example
+`bin/spark --cluster-config config/cluster.json cluster start --apply`.
 
 ### Check
 
@@ -464,8 +473,8 @@ bin/spark --cluster-config config/cluster.json cluster start --apply
 bin/spark --cluster-config config/cluster.json doctor --live
 ```
 
-For TP4, name `config/cluster-tp4.json` instead; `sync` then reaches the fourth
-node too. Every `--apply` needs the profile named: there is no default for a
+On a ring the site's shape is `tp4-ring`, and `sync` reaches the fourth node
+too. Every `--apply` needs the configuration named: there is no default for a
 command that changes the nodes.
 
 `cluster start` runs the [launch preflight](doctor.md#launch-preflight),

@@ -64,7 +64,7 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("url", help="the head URL the lab passes (unused)")
     parser.add_argument("--out", required=True)
-    parser.add_argument("--cluster-config", default="config/cluster-tp4.json")
+    parser.add_argument("--cluster-config", default="config/cluster.json")
     parser.add_argument("--log-lines", type=int, default=20000)
     args = parser.parse_args(argv)
     out = ROOT / args.out

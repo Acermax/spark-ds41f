@@ -170,7 +170,17 @@ class BootTimeTest(unittest.TestCase):
         self.assertIsNone(lab.ready_seconds(["boot failed"]))
 
 
-TP4 = "config/cluster-tp4.json"
+def setUpModule() -> None:
+    # These tests ran against the default profile when it was TP3 on config/nodes.json;
+    # the recipe resolves the same shape for them.
+    patcher = mock.patch.object(lab.spark.cluster_recipe, "site_shape", return_value="tp3-triangle")
+    patcher.start()
+    unittest.addModuleCleanup(patcher.stop)
+
+
+# A production profile other than the recipe: the archived TP4 r6k file (a
+# site restores an archived release this way while a shape is unqualified).
+TP4 = "experiments/2026-10-14-one-recipe/tp4-r6k-production.json"
 RING4 = {"nodes": [{"name": f"dgx{rank + 1}", "rank": rank, "head": rank == 0,
                     "management_ip": f"192.0.2.{71 + rank}"} for rank in range(4)]}
 
@@ -222,14 +232,14 @@ class ProductionProfileTest(unittest.TestCase):
 
     def test_the_window_record_wins_then_the_option_then_the_default(self) -> None:
         self.assertEqual(lab.resolve_production(None, None), "config/cluster.json")
-        self.assertEqual(lab.resolve_production("./config/cluster-tp4.json", None), TP4)
+        self.assertEqual(lab.resolve_production("./experiments/2026-10-14-one-recipe/tp4-r6k-production.json", None), TP4)
         ours = lab.new_hold(10, "", at=1_000_000.0)
         ours["production_config"] = TP4
         self.assertEqual(lab.resolve_production(None, ours), TP4)
         self.assertEqual(lab.resolve_production(TP4, ours), TP4)
         with self.assertRaises(SystemExit) as refused:
             lab.resolve_production("config/cluster.json", ours)
-        self.assertIn("restores config/cluster-tp4.json", str(refused.exception))
+        self.assertIn("restores experiments/2026-10-14-one-recipe/tp4-r6k-production.json", str(refused.exception))
         foreign = {"holder": "codex tool-eval-bench", "production_config": TP4}
         self.assertEqual(lab.resolve_production(None, foreign), "config/cluster.json")
         legacy = {k: v for k, v in ours.items() if k != "production_config"}
@@ -251,12 +261,12 @@ class ProductionProfileTest(unittest.TestCase):
             self.assertTrue(lab.stop_cluster(dry=True))
             self.assertTrue(lab.stop_cluster(dry=True, remove=True))
         kept, removed = [line for line in out.getvalue().splitlines() if "$" in line]
-        self.assertTrue(kept.endswith("--cluster-config config/cluster-tp4.json cluster stop --apply --parallel"))
+        self.assertTrue(kept.endswith("--cluster-config experiments/2026-10-14-one-recipe/tp4-r6k-production.json cluster stop --apply --parallel"))
         self.assertTrue(removed.endswith("cluster stop --remove --apply --parallel"))
         steps = lab.plan(dict(SPEC, jobs=[SPEC["jobs"][2], dict(SPEC["jobs"][2], remove_stopped=True)]))
         stops = [lab.describe_step(step) for step in steps if step["kind"] == "stop"]
-        self.assertEqual(stops, ["bin/spark --cluster-config config/cluster-tp4.json cluster stop --apply --parallel",
-                                 "bin/spark --cluster-config config/cluster-tp4.json cluster stop --remove "
+        self.assertEqual(stops, ["bin/spark --cluster-config experiments/2026-10-14-one-recipe/tp4-r6k-production.json cluster stop --apply --parallel",
+                                 "bin/spark --cluster-config experiments/2026-10-14-one-recipe/tp4-r6k-production.json cluster stop --remove "
                                  "--apply --parallel"])
 
     def test_doctor_live_checks_the_profile(self) -> None:
@@ -279,7 +289,7 @@ class ProductionProfileTest(unittest.TestCase):
             self.assertFalse(lab.boot("config/cluster.json", dry=True))
         self.assertIn("--cluster-config experiments/x/cluster-tp4-candidate.json cluster start --replace --change-shape --apply",
                       out.getvalue())
-        self.assertIn("lab windows require the promoted node topology (config/cluster-tp4.json)", out.getvalue())
+        self.assertIn("lab windows require the promoted node topology (experiments/2026-10-14-one-recipe/tp4-r6k-production.json)", out.getvalue())
         self.assertEqual(out.getvalue().count("cluster start"), 1)
 
     def test_dry_run_shows_the_profile_for_every_cluster_action(self) -> None:
@@ -287,18 +297,18 @@ class ProductionProfileTest(unittest.TestCase):
         spec.write_text(json.dumps(SPEC))
         code, out = self.main("run", str(spec), "--dry-run", "--production-config", TP4)
         self.assertEqual(code, 0)
-        self.assertIn("steps; production config/cluster-tp4.json", out.splitlines()[0])
-        self.assertIn("bin/spark --cluster-config config/cluster-tp4.json cluster stop --apply --parallel", out)
+        self.assertIn("steps; production experiments/2026-10-14-one-recipe/tp4-r6k-production.json", out.splitlines()[0])
+        self.assertIn("bin/spark --cluster-config experiments/2026-10-14-one-recipe/tp4-r6k-production.json cluster stop --apply --parallel", out)
         self.assertNotIn("--remove", out)
         code, out = self.main("window", "open", "--dry-run", "--production-config", TP4)
-        self.assertIn("window restoring config/cluster-tp4.json", out)
+        self.assertIn("window restoring experiments/2026-10-14-one-recipe/tp4-r6k-production.json", out)
         self.assertFalse(lab.HOLD.exists())
 
     def test_close_restores_the_profile_the_window_recorded(self) -> None:
         self.hold(TP4)
         code, out = self.main("window", "close", "--dry-run")
         self.assertEqual(code, 0)
-        self.assertIn("--cluster-config config/cluster-tp4.json cluster start --replace --change-shape --apply", out)
+        self.assertIn("--cluster-config experiments/2026-10-14-one-recipe/tp4-r6k-production.json cluster start --replace --change-shape --apply", out)
         self.assertTrue(lab.HOLD.exists())
         with self.assertRaises(SystemExit):
             self.main("window", "close", "--dry-run", "--production-config", "config/cluster.json")
@@ -308,7 +318,7 @@ class ProductionProfileTest(unittest.TestCase):
         _, out = self.main("window", "close", "--dry-run")
         self.assertIn("--cluster-config config/cluster.json cluster start", out)
         _, out = self.main("window", "close", "--dry-run", "--production-config", TP4)
-        self.assertIn("--cluster-config config/cluster-tp4.json cluster start", out)
+        self.assertIn("--cluster-config experiments/2026-10-14-one-recipe/tp4-r6k-production.json cluster start", out)
 
     def test_open_refuses_unless_the_profile_is_live(self) -> None:
         def down(problems=None):
@@ -340,7 +350,7 @@ class ProductionProfileTest(unittest.TestCase):
             lab.window_open(30, "test")
         self.assertEqual(lab.read_hold()["production_config"], TP4)
         self.assertEqual(popen.call_args.args[0][-3:], ["watchdog", "--production-config", TP4])
-        self.assertIn("restores config/cluster-tp4.json", out.getvalue())
+        self.assertIn("restores experiments/2026-10-14-one-recipe/tp4-r6k-production.json", out.getvalue())
 
     def test_watchdog_restores_the_recorded_profile(self) -> None:
         self.hold(TP4, heartbeat_at=1_000_000.0)  # stale
@@ -832,7 +842,7 @@ class KernelLabTest(unittest.TestCase):
             plain = lab.bundle_command(bundle, self.CANDIDATE, bundle / "out")
             carveout = lab.bundle_command(bundle, dict(self.CANDIDATE, display_carveout=True), bundle / "out")
         self.assertFalse([arg for arg in plain if "dri" in arg or "226" in arg])
-        serving = json.loads((ROOT / "config/cluster.json").read_text())["container"]["docker_run_args"]
+        serving = lab.spark.read_cluster("config/cluster.json", "tp3-triangle")["container"]["docker_run_args"]
         for arg in ("--mount=type=bind,source=/dev/dri/by-path/pci-000f:01:00.0-card,target=/dev/dri/card0",
                     "--device-cgroup-rule=c 226:* rw"):
             self.assertIn(arg, carveout)

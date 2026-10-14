@@ -497,7 +497,7 @@ SPARKNET_BIND = "/home/swank/sparknet-port/sparknet:/usr/local/lib/python3.12/di
 
 class LiveMountsTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.cluster = spark.json.loads((ROOT / "config" / "cluster-tp4.json").read_text())
+        self.cluster = spark.read_cluster("config/cluster.json", "tp4-ring")
         self.wanted = spark.expected_binds(self.cluster)
 
     def test_docker_run_is_given_the_compared_binds(self) -> None:
@@ -569,7 +569,7 @@ def container_env(wanted: dict[str, str]) -> list[str]:
 
 class LiveEnvironmentTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.cluster = spark.json.loads((ROOT / "config" / "cluster-tp4.json").read_text())
+        self.cluster = spark.read_cluster("config/cluster.json", "tp4-ring")
         site = spark.json.loads((ROOT / "config" / "examples" / "nodes-ring4.json").read_text())
         self.node = site["nodes"][0]
         self.wanted = spark.expected_environment(self.cluster, self.node)

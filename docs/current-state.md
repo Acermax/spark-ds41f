@@ -1,6 +1,6 @@
 # Current state
 
-Production is the TP4 1M profile ([config/cluster-tp4.json](../config/cluster-tp4.json))
+Production is the recipe's `tp4-ring` shape ([config/cluster.json](../config/cluster.json))
 on the four-node ring, promoted 2026-10-14 as
 [`2026-10-13-karmic-kraken-r6k`](../manifests/baselines/2026-10-13-karmic-kraken-r6k.json)
 ([promotion record](../experiments/2026-10-13-r6k/README.md)): image
@@ -32,8 +32,10 @@ on r6h's cost curves for that placement (`ring4-r6h-headout-20261012`), as its
 release comparison did. The temperature-0 references are new (70b3379cc289 /
 708ec5b17482), because the text follows the reference's arithmetic.
 
-The three-node profiles below (`config/cluster.json` and the 4 KiB / 64 KiB
-variants) stay on r6h
+The three-node shapes (`tp3-triangle`, `tp3-triangle-4k`) resolve to the
+recipe's r6k image but are not qualified on it until a TP3 release benchmark;
+until then a re-cabled triangle restores r6h from its archived record
+(`experiments/2026-10-14-one-recipe/tp3-r6h-production.json`), which stays on r6h
 ([`2026-10-12-karmic-kraken-r6h`](../manifests/baselines/2026-10-12-karmic-kraken-r6h.json),
 image `sha256:0aaa5d8b`, cost curves `tp3-r6h-20261012`). They are pinned to
 r6h's lock (`experiments/2026-10-12-r6h/upstreams.lock.json`) until they boot

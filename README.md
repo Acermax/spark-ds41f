@@ -31,19 +31,20 @@ shapes, number formats, one decoder layer, attention, mHC, Engram, DSpark, and
 how TP3 and TP4 split the layers.
 
 The deployment tools also generate and validate a
-[four-node switchless ring profile](docs/switchless-topology.md). The
-[TP4 1M profile](config/cluster-tp4.json) serves the
-checkpoint's full 1,048,576-token context with 16 sequences on the same image
-as the three-node deployment, and was benchmarked at those limits (see
-[Performance](#performance)). The promoted configuration below is the
-three-node deployment.
+[four-node switchless ring](docs/switchless-topology.md). One recipe,
+[config/cluster.json](config/cluster.json), serves every shape on one image:
+four nodes in a ring (`tp4-ring`, the checkpoint's full 1,048,576-token
+context with 16 sequences, benchmarked at those limits, see
+[Performance](#performance)) and three in a triangle (`tp3-triangle`, 524,288
+tokens and 8 sequences). The shapes differ only in their cabling (node map,
+transport, NCCL settings) and their memory sizing.
 
 Named [TP3/TP4 transport tuning profiles](experiments/2026-10-03-transport-profiles/README.md)
 keep B12X's measured RoCEnante limits and NCCL settings together.
 `bin/spark tuning show tp4` shows the B12X TP4 recipe; `tuning create`
 generates a complete B12X configuration for a site node map, with launch
-disabled. The promoted TileLang profiles are [config/cluster.json](config/cluster.json)
-(TP3) and [config/cluster-tp4.json](config/cluster-tp4.json) (TP4).
+disabled. The promoted TileLang configuration is the recipe
+[config/cluster.json](config/cluster.json).
 
 This repository is being promoted from a forensic capture of the running cluster
 into its only operational source of truth. Until the transition checklist is
@@ -59,27 +60,30 @@ Two Sparks are not supported. [docs/setup.md](docs/setup.md) is the full
 guide: what each stage changes on your machines, how to check it, and how to
 undo it.
 
-| Sparks | Profile | Context | Kernel | [Memory saver](https://github.com/christopherowen/dgx-spark-memory-saver) |
+| Sparks | Shape of [config/cluster.json](config/cluster.json) | Context | Kernel | [Memory saver](https://github.com/christopherowen/dgx-spark-memory-saver) |
 | --- | --- | ---: | --- | --- |
-| 3 | [config/cluster-4k.json](config/cluster-4k.json) | 262,144 | stock 4 KiB | not needed |
-| 3 | [config/cluster.json](config/cluster.json) | 524,288 | 64 KiB | required |
-| 4 | [config/cluster-tp4.json](config/cluster-tp4.json) | 1,048,576 | 64 KiB | required |
+| 3 | `tp3-triangle-4k` | 262,144 | stock 4 KiB | not needed |
+| 3 | `tp3-triangle` | 524,288 | 64 KiB | required |
+| 4 | `tp4-ring` | 1,048,576 | 64 KiB | required |
 
-The 4 KiB profile needs no kernel change, so it is the shortest path to a
-running service.
+Name your cabling once with `bin/spark site shape NAME --apply`; every command
+then resolves the recipe at that shape (`--shape NAME` overrides it). The 4 KiB
+shape needs no kernel change, so it is the shortest path to a running service.
+A shape starts only once a release benchmark has qualified the recipe's image
+on it (`benchmark_reference`); `cluster start --unqualified-shape` overrides that.
 
 | Stage | Do | Check |
 | --- | --- | --- |
 | 1 | [Host baseline](docs/setup.md#1-host-baseline): `scripts/host-recovery apply`, headless boot, `nvidia-drm` mode setting, reboot | `scripts/host-recovery check` |
 | 2 | [64 KiB kernel and memory saver](docs/setup.md#2-kernel-64-kib-profiles) (64 KiB profiles only) | `getconf PAGESIZE` prints 65536 |
 | 3 | [Fabric](docs/setup.md#3-fabric-cabling-and-addressing): cable, then address with `sparknet topology discover` | 9000-byte pings on every cable path |
-| 4 | [Site configuration](docs/setup.md#4-site-configuration): node map, head address, interfaces | `bin/spark doctor` |
+| 4 | [Site configuration](docs/setup.md#4-site-configuration): node map, head address, interfaces, `bin/spark site shape NAME --apply` | `bin/spark doctor` |
 | 5 | [Model](docs/setup.md#5-model): the pinned checkpoint on every node | |
 | 6 | [Image](docs/setup.md#6-image): `bin/spark build prepare`, `bin/spark --cluster-config config/cluster.json build image --apply`, copy to every node | one image ID everywhere |
 | 7 | [First start](docs/setup.md#7-first-start): `bin/spark --cluster-config config/cluster.json cluster start --apply` | `bin/spark doctor --live` |
 | 8 | [Verify](docs/setup.md#8-verify): `bin/spark bench` | quality 5/5, no regressions |
 
-Read-only commands default to `config/cluster.json`; every command that takes
+Read-only commands default to `config/cluster.json` at the site's shape; every command that takes
 `--apply` refuses to act until the profile is named with `--cluster-config <profile>`
 before the subcommand, so no node operation runs on a profile by accident. The
 repository never changes a host by itself:
@@ -176,11 +180,14 @@ baseline is still
 One content-addressed image runs on all three nodes and passes the LRU
 coherence gate 5/5; see [Performance](#performance).
 
-The machine-readable desired configuration is [config/cluster.json](config/cluster.json).
-The named [4 KiB and 64 KiB profiles](docs/memory-profiles.md) retain the
-previous capacity as a fallback and select the larger 64 KiB profile by default;
-[config/cluster-tp4.json](config/cluster-tp4.json) is the four-node TP4 1M
-profile on the same image (`--cluster-config config/cluster-tp4.json`).
+The machine-readable desired configuration is the recipe
+[config/cluster.json](config/cluster.json): everything the shapes share once,
+and a `shapes` table with each shape's node map, transport, NCCL settings,
+memory sizing, cost curves and qualifying benchmark
+([scripts/recipe.py](scripts/recipe.py) resolves it; the
+[memory profiles](docs/memory-profiles.md) explain the page-size variants). The
+per-shape files it replaced are archived as release records in
+[experiments/2026-10-14-one-recipe](experiments/2026-10-14-one-recipe/README.md).
 To reproduce the deployment on your own Sparks, follow
 [docs/setup.md](docs/setup.md).
 
@@ -575,8 +582,8 @@ The report is still written if the run stops early.
 
 With a reference run, each decode and prefill point shows its percent change
 with a Welch 95% interval. The default reference is the profile's
-`benchmark_reference` when it names one, as
-[config/cluster-tp4.json](config/cluster-tp4.json) does for its four-node run,
+`benchmark_reference` when it names one, as the recipe's `tp4-ring` shape
+does for its four-node run,
 and otherwise `manifests/benchmarks/<promoted_baseline>.json`. A run is only
 comparable with a reference of the same node count, transport and kernel
 backend. The bench refuses a default reference that differs in any of them;

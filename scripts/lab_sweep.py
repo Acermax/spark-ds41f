@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Write a one-variable environment sweep as lab arms and a run spec under experiments/.
 
-usage: scripts/lab_sweep.py --base config/cluster-tp4.json --variable NAME --values V1,V2,...
+usage: scripts/lab_sweep.py --base config/cluster.json [--shape NAME] --variable NAME --values V1,V2,...
            --experiment experiments/<dir> --run NAME [--streams 1,4,16] [--samples 3]
            [--tokens 256] [--profile lean] [--label PREFIX]
 
@@ -28,6 +28,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+
+import recipe  # noqa: E402
 VALUE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
@@ -84,6 +87,7 @@ def check_destination(experiment: str) -> Path:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--base", required=True, help="repository-relative base profile")
+    parser.add_argument("--shape", help="the recipe shape to sweep (default: the site's)")
     parser.add_argument("--variable", required=True)
     parser.add_argument("--values", required=True, help="comma-separated")
     parser.add_argument("--experiment", required=True)
@@ -97,6 +101,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         check_destination(args.experiment)
         base = json.loads((ROOT / args.base).read_text())
+        if recipe.is_recipe(base):  # the arms are concrete: the recipe at one shape
+            shape = args.shape or recipe.site_shape(ROOT)
+            if shape is None:
+                raise ValueError(f"{args.base} is a recipe: pass --shape (this site names none)")
+            base = recipe.resolve(base, shape)
         files = sweep(base, args.base, args.variable, [v.strip() for v in args.values.split(",") if v.strip()],
                       args.experiment.rstrip("/"), args.run, [int(s) for s in args.streams.split(",")],
                       args.samples, args.tokens, args.profile, args.label)

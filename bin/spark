@@ -38,6 +38,7 @@ import kernel_readiness
 import topology
 import transport_profiles
 import model_layout
+import recipe as cluster_recipe
 
 
 
@@ -79,11 +80,44 @@ def site_nodes() -> dict:
 def configuration(
     args: argparse.Namespace | None = None,
 ) -> tuple[dict, dict, dict]:
-    cluster_path, _ = cluster_config_path(args)
+    """The concrete cluster configuration, its node map and its upstream lock.
+
+    A recipe (``config/cluster.json``) resolves to the shape the site is cabled
+    as (``config/site.json``), or to ``--shape``.
+    """
+    cluster_path, canonical = cluster_config_path(args)
     cluster = json.loads(cluster_path.read_text(encoding="utf-8"))
+    shape_nodes = None
+    if cluster_recipe.is_recipe(cluster):
+        shape = getattr(args, "shape", None) or cluster_recipe.site_shape(ROOT)
+        if shape is None:
+            raise SystemExit(
+                f"{canonical} serves {', '.join(sorted(cluster['shapes']))}; name this site's cabling with "
+                f"`bin/spark site shape NAME --apply` ({cluster_recipe.SITE_FILE}) or pass --shape"
+            )
+        shape_nodes = int(cluster_recipe.shape_entry(cluster, shape)["nodes"])
+        cluster = cluster_recipe.resolve(cluster, shape)
     nodes_path = repository_config_path(cluster.get("nodes_config", "config/nodes.json"))
     upstreams_path = repository_config_path(cluster.get("upstreams_config", "upstreams.lock.json"))
-    return cluster, (site_nodes() if nodes_path == ROOT / NODES_FILE else json.loads(nodes_path.read_text())), json.loads(upstreams_path.read_text())
+    nodes = site_nodes() if nodes_path == ROOT / NODES_FILE else json.loads(nodes_path.read_text())
+    if shape_nodes is not None and len(nodes["nodes"]) != shape_nodes:
+        raise SystemExit(
+            f"shape {cluster['shape']} needs {shape_nodes} nodes and its node map "
+            f"{cluster.get('nodes_config', NODES_FILE)} has {len(nodes['nodes'])}"
+        )
+    return cluster, nodes, json.loads(upstreams_path.read_text())
+
+
+def read_cluster(relative: str, shape: str | None = None) -> dict:
+    """A cluster configuration file as concrete settings: a recipe resolves to
+    ``shape``, else to the site's."""
+    cluster = read_json(relative)
+    if not cluster_recipe.is_recipe(cluster):
+        return cluster
+    name = shape or cluster_recipe.site_shape(ROOT)
+    if name is None:
+        raise SystemExit(f"{relative} is a recipe: name a shape (this site names none in {cluster_recipe.SITE_FILE})")
+    return cluster_recipe.resolve(cluster, name)
 
 
 def repository_config_path(raw: str) -> Path:
@@ -1161,6 +1195,22 @@ def command_doctor(args: argparse.Namespace) -> int:
     return report_doctor(problems, warnings, args.live)
 
 
+def command_site_shape(args: argparse.Namespace) -> int:
+    recipe = read_json(DEFAULT_CLUSTER_CONFIG)
+    current = cluster_recipe.site_shape(ROOT)
+    if args.name is None:
+        print(current or f"no shape named ({cluster_recipe.SITE_FILE} is missing)")
+        return 0
+    entry = cluster_recipe.shape_entry(recipe, args.name)
+    if not args.apply:
+        print(f"would name this site {args.name} ({entry['nodes']} nodes, {entry['fabric']['transport']}, node map "
+              f"{entry.get('nodes_config', NODES_FILE)}); pass --apply, then `cluster sync` and `doctor --live`")
+        return 0
+    (ROOT / cluster_recipe.SITE_FILE).write_text(json.dumps({"shape": args.name}, indent=2) + "\n", encoding="utf-8")
+    print(f"this site is cabled as {args.name}; run `cluster sync` to copy it and `doctor --live` to check the links")
+    return 0
+
+
 def command_tuning(args: argparse.Namespace) -> int:
     if args.cluster_config not in (None, DEFAULT_CLUSTER_CONFIG):
         raise SystemExit("tuning profiles select their pinned base; omit --cluster-config")
@@ -1612,6 +1662,8 @@ def command_cluster_sync(args: argparse.Namespace) -> int:
     # Read before any checkout: on the head node the checkout can be ROOT, and
     # moving it off a commit that still tracked the file removes it.
     site_paths = {NODES_FILE, cluster.get("nodes_config", NODES_FILE)}
+    if (ROOT / cluster_recipe.SITE_FILE).is_file():
+        site_paths.add(cluster_recipe.SITE_FILE)
     site_texts = {relative: repository_config_path(relative).read_text(encoding="utf-8") for relative in site_paths}
     quoted_path = shlex.quote(path)
     fetch_script = (
@@ -1971,6 +2023,11 @@ def command_cluster_start(args: argparse.Namespace) -> int:
     require_named_profile(args)
     cluster, nodes, upstreams = configuration(args)
     _, config_relative = cluster_config_path(args)
+    if args.apply and "shape" in cluster and "benchmark_reference" not in cluster and not args.unqualified_shape:
+        raise SystemExit(
+            f"no release benchmark qualifies this recipe's image on {cluster['shape']}: bench it in a lab "
+            "window first (experiments/2026-10-14-one-recipe/README.md), or pass --unqualified-shape"
+        )
     if args.apply and not cluster["deployment"]["launch_enabled"]:
         print(
             "ERROR: this cluster configuration is not authorized for launch",
@@ -5463,7 +5520,19 @@ def parser() -> argparse.ArgumentParser:
         help="repository-relative cluster config (default for read-only commands: config/cluster.json; "
         "every --apply needs it named)",
     )
+    root.add_argument(
+        "--shape",
+        default=None,
+        metavar="NAME",
+        help=f"the recipe's shape to use instead of the site's cabling ({cluster_recipe.SITE_FILE})",
+    )
     commands = root.add_subparsers(dest="command", required=True)
+    site = commands.add_parser("site", help="this site's cabling: the recipe shape it serves")
+    site_commands = site.add_subparsers(dest="site_command", required=True)
+    site_shape = site_commands.add_parser("shape", help="show or set the shape this site is cabled as")
+    site_shape.add_argument("name", nargs="?", help="a shape of config/cluster.json (after re-cabling)")
+    site_shape.add_argument("--apply", action="store_true")
+    site_shape.set_defaults(func=command_site_shape)
     doctor = commands.add_parser("doctor", help="validate repository and optional live state")
     doctor.add_argument("--live", action="store_true")
     doctor.add_argument(
@@ -5519,6 +5588,10 @@ def parser() -> argparse.ArgumentParser:
     cluster_start.add_argument(
         "--change-shape", action="store_true",
         help="allow a start that changes the engine's node count, tensor parallelism, context or KV size",
+    )
+    cluster_start.add_argument(
+        "--unqualified-shape", action="store_true",
+        help="start a recipe shape that no release benchmark has qualified for the recipe's image",
     )
     cluster_start.add_argument(
         "--verbose", action="store_true", help="print each rank's docker command in the plan"
