@@ -88,7 +88,9 @@ def configuration(
     cluster_path, canonical = cluster_config_path(args)
     cluster = json.loads(cluster_path.read_text(encoding="utf-8"))
     shape_nodes = None
-    if cluster_recipe.is_recipe(cluster):
+    if cluster_recipe.is_overlay(cluster):
+        cluster = read_cluster(canonical)
+    elif cluster_recipe.is_recipe(cluster):
         shape = getattr(args, "shape", None) or cluster_recipe.site_shape(ROOT)
         if shape is None:
             raise SystemExit(
@@ -110,8 +112,14 @@ def configuration(
 
 def read_cluster(relative: str, shape: str | None = None) -> dict:
     """A cluster configuration file as concrete settings: a recipe resolves to
-    ``shape``, else to the site's."""
+    ``shape``, else to the site's; an arm overlay resolves its base first."""
     cluster = read_json(relative)
+    if cluster_recipe.is_overlay(cluster):
+        base = cluster["extends"]
+        if cluster_recipe.is_recipe(read_json(base["config"])) and not base.get("shape"):
+            raise SystemExit(f"{relative} extends the recipe {base['config']}: name its shape, an arm must not "
+                             "follow the site's cabling")
+        return cluster_recipe.overlay(cluster, read_cluster(base["config"], base.get("shape")))
     if not cluster_recipe.is_recipe(cluster):
         return cluster
     name = shape or cluster_recipe.site_shape(ROOT)

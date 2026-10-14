@@ -6,6 +6,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -90,6 +91,28 @@ class RecipeTest(unittest.TestCase):
     def test_no_other_cluster_files(self):
         """One recipe: no per-shape copies beside it."""
         self.assertEqual(sorted(p.name for p in (ROOT / "config").glob("cluster*.json")), ["cluster.json"])
+
+
+
+class OverlayTest(unittest.TestCase):
+    """Experiment arms hold only what they change over the configuration they extend."""
+
+    def test_an_overlay_sets_unsets_and_is_not_production(self):
+        base = recipe.resolve(load("config/cluster.json"), "tp4-ring")
+        arm = {"extends": {"config": "config/cluster.json", "shape": "tp4-ring"},
+               "set": {"container": {"image": "x:y"}, "environment": {"NEW": "1"}},
+               "unset": ["environment.SPARKNET_ROCE_SPIN_LIMIT"]}
+        resolved = recipe.overlay(arm, base)
+        self.assertEqual(resolved["container"]["image"], "x:y")
+        self.assertEqual(resolved["container"]["name"], base["container"]["name"])  # merged, not replaced
+        self.assertEqual(resolved["environment"]["NEW"], "1")
+        self.assertNotIn("SPARKNET_ROCE_SPIN_LIMIT", resolved["environment"])
+        self.assertNotIn("shape", resolved)
+        self.assertNotIn("benchmark_reference", resolved)
+        with self.assertRaises(SystemExit):
+            recipe.overlay({"extends": {}, "unset": ["environment.NOT_THERE"]}, base)
+        with self.assertRaises(SystemExit):
+            recipe.overlay({"extends": {}, "container": {}}, base)
 
 
 if __name__ == "__main__":

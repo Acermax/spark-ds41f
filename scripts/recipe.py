@@ -13,7 +13,9 @@ really changes:
   image on that shape. A shape without one may not start in production.
 
 A shape may ``extend`` another (the 4 KiB-page variant of TP3 changes the host
-kernel and the sizing only). The site names the shape it is cabled as in
+kernel and the sizing only). An experiment arm is an overlay: ``extends`` names
+a configuration (the recipe at a shape, or another arm) and ``set``/``unset``
+hold only what the arm changes, so arms cannot drift from what they compare to. The site names the shape it is cabled as in
 ``config/site.json``; ``--shape`` overrides it for planning.
 
 ``resolve`` returns the same concrete cluster configuration a per-shape file
@@ -119,6 +121,35 @@ def resolve(recipe: dict, name: str) -> dict:
         cluster["nodes_config"] = shape["nodes_config"]
     if "benchmark_reference" in shape:
         cluster["benchmark_reference"] = shape["benchmark_reference"]
+    return cluster
+
+
+def is_overlay(cluster: dict) -> bool:
+    return "extends" in cluster
+
+
+def overlay(arm: dict, base: dict) -> dict:
+    """An experiment arm: ``base`` (the recipe at a shape, or another arm, already
+    resolved) with ``set`` merged in and the dotted paths of ``unset`` removed.
+
+    An arm is not production: it carries neither the recipe's shape nor its
+    qualifying benchmark, so starting it needs no qualification and a bench names
+    its own reference.
+    """
+    unknown = set(arm) - {"extends", "set", "unset", "notes"}
+    if unknown:
+        raise SystemExit(f"an arm overlay holds extends, set, unset and notes; not {', '.join(sorted(unknown))}")
+    cluster = _merge(base, arm.get("set", {}))
+    for key in ("shape", "benchmark_reference"):
+        cluster.pop(key, None)
+    for dotted in arm.get("unset", []):
+        *parents, last = dotted.split(".")
+        node = cluster
+        for part in parents:
+            node = node.get(part, {}) if isinstance(node, dict) else {}
+        if not isinstance(node, dict) or last not in node:
+            raise SystemExit(f"the arm unsets {dotted}, which its base does not set")
+        del node[last]
     return cluster
 
 

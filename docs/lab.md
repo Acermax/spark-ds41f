@@ -66,6 +66,22 @@ scripts/lab.py run scripts/lab_specs/lab1-first-window.json --dry-run
 scripts/lab.py run scripts/lab_specs/lab1-first-window.json
 ```
 
+**Arms are overlays.** An arm configuration names what it extends and holds only what it
+changes, so it cannot drift from what it is compared with:
+
+```json
+{
+  "extends": {"config": "config/cluster.json", "shape": "tp4-ring"},
+  "set": {"container": {"image": "vllm-ds41f-kkref:...-r6m"}, "environment": {"NAME": "value"}},
+  "unset": ["environment.OLD_NAME"]
+}
+```
+
+`extends` may name another arm (a dev arm extends its release arm); an arm of the recipe
+must name its shape. `set` merges into the base, `unset` removes dotted paths (an unset
+the base does not have is an error). An arm never carries the recipe's shape or
+qualifying benchmark. Older experiments keep their complete files.
+
 Over ssh, detach a long `run` or `queue run` from the session: use `setsid -f` with every
 stream redirected, or run it inside tmux. `lab.py` logs to stdout. If stdout is the session's
 pipe and the session ends, the next log line fails with a broken pipe and the runner exits.
