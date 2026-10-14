@@ -114,6 +114,29 @@ class OverlayTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             recipe.overlay({"extends": {}, "container": {}}, base)
 
+    def test_r6m_changes_only_its_own_settings_over_r6l(self):
+        import importlib.machinery
+        import importlib.util
+
+        loader = importlib.machinery.SourceFileLoader("spark", str(ROOT / "bin" / "spark"))
+        spec = importlib.util.spec_from_loader("spark", loader)
+        spark = importlib.util.module_from_spec(spec)
+        loader.exec_module(spark)
+        r6l = load("experiments/2026-10-14-r6l/r6l-release.json")
+        r6m = spark.read_cluster("experiments/2026-10-14-r6m/r6m-release.json")
+        self.assertEqual({k for k in set(r6l["environment"]) | set(r6m["environment"])
+                          if r6l["environment"].get(k) != r6m["environment"].get(k)},
+                         {"SPARKNET_ROCE_KERNELS", "SPARKNET_ROCE_SPIN_LIMIT", "SPARKNET_ROCE_TIMEOUT_MS"})
+        self.assertEqual(r6m["serve_args"], r6l["serve_args"])
+        self.assertEqual({k: v for k, v in r6m.items() if k not in ("container", "environment", "upstreams_config")},
+                         {k: v for k, v in r6l.items() if k not in ("container", "environment", "upstreams_config")})
+        # An arm of the recipe names its shape: it must not follow the site's cabling.
+        unpinned = {"extends": {"config": "config/cluster.json"}, "set": {}}
+        read = spark.read_json
+        with mock.patch.object(spark, "read_json", lambda path: unpinned if path == "arm.json" else read(path)), \
+                self.assertRaisesRegex(SystemExit, "name its shape"):
+            spark.read_cluster("arm.json")
+
 
 if __name__ == "__main__":
     unittest.main()

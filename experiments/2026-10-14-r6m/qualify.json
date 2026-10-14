@@ -1,0 +1,307 @@
+{
+ "experiment": "experiments/2026-10-14-r6m",
+ "run": "r6m-qualify",
+ "jobs": [
+  {
+   "kind": "sync"
+  },
+  {
+   "kind": "fabric",
+   "config": "r6m-release.json",
+   "script": "scripts/probe_collectives.py",
+   "label": "probe"
+  },
+  {
+   "kind": "fabric",
+   "config": "r6m-release.json",
+   "script": "failstop.py",
+   "label": "failstop-eager",
+   "environment": {
+    "FAILSTOP_SCENARIO": "eager"
+   }
+  },
+  {
+   "kind": "fabric",
+   "config": "r6m-release.json",
+   "script": "failstop.py",
+   "label": "failstop-graph",
+   "environment": {
+    "FAILSTOP_SCENARIO": "graph"
+   }
+  },
+  {
+   "kind": "measure",
+   "bench": false,
+   "bracket": false,
+   "telemetry": false,
+   "arms": [
+    {
+     "config": "r6m-coldcache.json",
+     "label": "cold"
+    }
+   ],
+   "extras": [
+    [
+     "scripts/collect_node_traces.py",
+     [
+      "--out",
+      "results/private/r6m/cold-cache/{label}"
+     ],
+     "collect"
+    ]
+   ]
+  },
+  {
+   "kind": "measure",
+   "bench": false,
+   "bracket": false,
+   "telemetry": false,
+   "arms": [
+    {
+     "config": "r6m-traced.json",
+     "label": "f1"
+    }
+   ],
+   "extras": [
+    [
+     "scripts/servebench_run.py",
+     [
+      "--mode",
+      "poisson",
+      "--rate",
+      "0.4",
+      "--warmup",
+      "0",
+      "--duration",
+      "20",
+      "--extra-body",
+      "{\"chat_template_kwargs\":{\"thinking\":false}}",
+      "--label",
+      "{label}-poisson",
+      "--output",
+      "results/private/r6m/first-request/{label}-poisson.json"
+     ],
+     "poisson"
+    ],
+    [
+     "scripts/collect_node_traces.py",
+     [
+      "--out",
+      "results/private/r6m/first-request/{label}"
+     ],
+     "collect"
+    ]
+   ]
+  },
+  {
+   "kind": "measure",
+   "bench": false,
+   "bracket": false,
+   "telemetry": false,
+   "arms": [
+    {
+     "config": "r6m-traced.json",
+     "label": "f2"
+    }
+   ],
+   "extras": [
+    [
+     "scripts/servebench_run.py",
+     [
+      "--mode",
+      "poisson",
+      "--rate",
+      "0.4",
+      "--warmup",
+      "0",
+      "--duration",
+      "20",
+      "--extra-body",
+      "{\"chat_template_kwargs\":{\"thinking\":false}}",
+      "--label",
+      "{label}-poisson",
+      "--output",
+      "results/private/r6m/first-request/{label}-poisson.json"
+     ],
+     "poisson"
+    ],
+    [
+     "scripts/collect_node_traces.py",
+     [
+      "--out",
+      "results/private/r6m/first-request/{label}"
+     ],
+     "collect"
+    ]
+   ]
+  },
+  {
+   "kind": "measure",
+   "bench": false,
+   "bracket": false,
+   "telemetry": false,
+   "arms": [
+    {
+     "config": "r6m-traced.json",
+     "label": "f3"
+    }
+   ],
+   "extras": [
+    [
+     "scripts/servebench_run.py",
+     [
+      "--mode",
+      "poisson",
+      "--rate",
+      "0.4",
+      "--warmup",
+      "0",
+      "--duration",
+      "20",
+      "--extra-body",
+      "{\"chat_template_kwargs\":{\"thinking\":false}}",
+      "--label",
+      "{label}-poisson",
+      "--output",
+      "results/private/r6m/first-request/{label}-poisson.json"
+     ],
+     "poisson"
+    ],
+    [
+     "scripts/collect_node_traces.py",
+     [
+      "--out",
+      "results/private/r6m/first-request/{label}"
+     ],
+     "collect"
+    ]
+   ]
+  },
+  {
+   "kind": "measure",
+   "bench": false,
+   "bracket": false,
+   "telemetry": false,
+   "arms": [
+    {
+     "config": "r6m-traced.json",
+     "label": "f4"
+    }
+   ],
+   "extras": [
+    [
+     "scripts/servebench_run.py",
+     [
+      "--mode",
+      "poisson",
+      "--rate",
+      "0.4",
+      "--warmup",
+      "0",
+      "--duration",
+      "20",
+      "--extra-body",
+      "{\"chat_template_kwargs\":{\"thinking\":false}}",
+      "--label",
+      "{label}-poisson",
+      "--output",
+      "results/private/r6m/first-request/{label}-poisson.json"
+     ],
+     "poisson"
+    ],
+    [
+     "scripts/collect_node_traces.py",
+     [
+      "--out",
+      "results/private/r6m/first-request/{label}"
+     ],
+     "collect"
+    ]
+   ]
+  },
+  {
+   "kind": "measure",
+   "bench": false,
+   "bracket": false,
+   "telemetry": false,
+   "arms": [
+    {
+     "config": "r6m-traced.json",
+     "label": "f5"
+    }
+   ],
+   "extras": [
+    [
+     "scripts/servebench_run.py",
+     [
+      "--mode",
+      "poisson",
+      "--rate",
+      "0.4",
+      "--warmup",
+      "0",
+      "--duration",
+      "20",
+      "--extra-body",
+      "{\"chat_template_kwargs\":{\"thinking\":false}}",
+      "--label",
+      "{label}-poisson",
+      "--output",
+      "results/private/r6m/first-request/{label}-poisson.json"
+     ],
+     "poisson"
+    ],
+    [
+     "scripts/collect_node_traces.py",
+     [
+      "--out",
+      "results/private/r6m/first-request/{label}"
+     ],
+     "collect"
+    ]
+   ]
+  },
+  {
+   "kind": "measure",
+   "bench": false,
+   "bracket": false,
+   "telemetry": false,
+   "arms": [
+    {
+     "config": "r6m-traced.json",
+     "label": "f6"
+    }
+   ],
+   "extras": [
+    [
+     "scripts/servebench_run.py",
+     [
+      "--mode",
+      "poisson",
+      "--rate",
+      "0.4",
+      "--warmup",
+      "0",
+      "--duration",
+      "20",
+      "--extra-body",
+      "{\"chat_template_kwargs\":{\"thinking\":false}}",
+      "--label",
+      "{label}-poisson",
+      "--output",
+      "results/private/r6m/first-request/{label}-poisson.json"
+     ],
+     "poisson"
+    ],
+    [
+     "scripts/collect_node_traces.py",
+     [
+      "--out",
+      "results/private/r6m/first-request/{label}"
+     ],
+     "collect"
+    ]
+   ]
+  }
+ ]
+}

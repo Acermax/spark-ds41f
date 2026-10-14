@@ -1,0 +1,12 @@
+{
+  "notes": "r6m on an empty TileLang cache on every rank (a first boot, as on a new site): reproduces the startup rank skew of the forum report and shows what compiles inside a collective phase. The cache directory is new and left on the nodes' /cache volume.",
+  "extends": {
+    "config": "experiments/2026-10-14-r6m/r6m-release.json"
+  },
+  "set": {
+    "environment": {
+      "TILELANG_CACHE_DIR": "/cache/kkref/jit/tilelang-cold-r6m",
+      "SPARKNET_ROCE_TRACE": "1"
+    }
+  }
+}
