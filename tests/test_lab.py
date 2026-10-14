@@ -417,6 +417,85 @@ class QueueTest(unittest.TestCase):
                 lab.plan(dict(SPEC, jobs=[{"kind": "gpu_clocks", "lock_mhz": bad}]))
 
 
+class PlanProblemsTest(unittest.TestCase):
+    """Mistakes that would cost a boot are found from the spec alone."""
+
+    def measure(self, extras: list) -> dict:
+        return {"experiment": "experiments/2026-10-14-servebench", "run": "r", "jobs": [
+            {"kind": "measure", "bench": False, "extras": extras,
+             "arms": [{"config": "experiments/2026-10-14-servebench/engine-r6k.json", "label": "a"}]}]}
+
+    def test_good_servebench_arguments_pass(self) -> None:
+        spec = self.measure([["scripts/servebench_run.py", ["--mode", "closed", "--concurrency", "16"], "c16"],
+                             ["scripts/servebench_engine.py", ["--replays", "100"], "grid"]])
+        self.assertEqual(lab.plan_problems(lab.plan(spec)), [])
+
+    def test_bad_arguments_missing_files_and_configs(self) -> None:
+        spec = self.measure([["scripts/servebench_run.py", ["--mode", "sideways"], "c16"],
+                             ["no_such_script.py", [], "x"]])
+        spec["jobs"][0]["arms"].append({"config": "missing.json", "label": "b"})
+        problems = lab.plan_problems(lab.plan(spec))
+        self.assertTrue(any("servebench_run.py" in p and "invalid choice" in p for p in problems), problems)
+        self.assertTrue(any("no_such_script.py does not exist" in p for p in problems), problems)
+        self.assertTrue(any("missing.json does not exist" in p for p in problems), problems)
+
+    def test_queue_rejects_without_a_sync_and_warns_with_one(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(lab, "QUEUE", Path(directory) / "q"):
+            bad = self.measure([["scripts/servebench_run.py", ["--mode", "sideways"], "c16"]])
+            path = Path(directory) / "bad.json"
+            path.write_text(json.dumps(bad))
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                lab.queue_add(str(path))
+            path.write_text(json.dumps(dict(bad, jobs=[{"kind": "sync"}, *bad["jobs"]])))
+            with contextlib.redirect_stderr(io.StringIO()) as warned, contextlib.redirect_stdout(io.StringIO()):
+                lab.queue_add(str(path))
+            self.assertIn("checked again after the run's sync", warned.getvalue())
+
+
+class TelemetryTest(unittest.TestCase):
+    """Node telemetry around a measured step: summarized, saved, never fatal."""
+
+    LINES = "".join(f"2026/10/14 07:00:{i:02d}.000, {2400 + i}, 4266, {50 + i}.0, 60, 0x0000000000000000\n"
+                    for i in range(10)) + "2026/10/14 07:00:10.000, 1100, 4266, 30.0, 61, 0x0000000000000004\n"
+
+    def test_summary(self) -> None:
+        summary = lab.summarize_telemetry(self.LINES + "garbage line\n")
+        self.assertEqual(summary["samples"], 11)
+        self.assertEqual(summary["clocks.sm"]["min"], 1100)
+        self.assertEqual(summary["clocks.sm"]["max"], 2409)
+        self.assertEqual(summary["event_reasons"], {"0x0000000000000000": 10, "0x0000000000000004": 1})
+
+    def test_step_writes_beside_its_output(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            process = mock.Mock()
+            process.communicate.return_value = (self.LINES, "")
+            marker = Path(directory) / "locked.json"
+            marker.write_text(json.dumps({"lock_mhz": [2400, 2400]}))
+            with mock.patch.object(lab, "ROOT", Path(directory)), \
+                    mock.patch.object(lab, "GPU_CLOCKS_MARKER", marker), \
+                    mock.patch.object(lab, "nodes_config", return_value={"ssh_user": "u", "nodes": [{"name": "n1"}, {"name": "n2"}]}), \
+                    mock.patch.object(lab.spark, "ssh_options", return_value=[]), \
+                    mock.patch.object(lab.subprocess, "Popen", return_value=process) as popen:
+                with lab.Telemetry("results/x/c16-arm.jsonl"):
+                    pass
+            saved = json.loads((Path(directory) / "results/x/c16-arm.jsonl.telemetry.json").read_text())
+        self.assertEqual(sorted(saved["nodes"]), ["n1", "n2"])
+        self.assertEqual(saved["gpu_clocks_lock"], {"lock_mhz": [2400, 2400]})
+        self.assertEqual(saved["nodes"]["n1"]["samples"], 11)
+        self.assertEqual(popen.call_count, 2)
+        self.assertIn("nvidia-smi", popen.call_args.args[0][-1])
+        process.terminate.assert_called()
+
+    def test_never_fails_the_step(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(lab, "ROOT", Path(directory)), mock.patch.object(lab, "log"), \
+                mock.patch.object(lab, "nodes_config", side_effect=RuntimeError("no map")):
+            with lab.Telemetry("results/y/out.jsonl"):
+                ran = True
+            self.assertTrue(ran)
+            self.assertTrue((Path(directory) / "results/y/out.jsonl.telemetry.json").exists())
+
+
 class GpuClocksTest(unittest.TestCase):
     """A lock applies to every node or to none, and restoring production resets it."""
 
@@ -761,6 +840,8 @@ class StepFailureTest(unittest.TestCase):
                 mock.patch.object(lab, "boot", return_value=True), \
                 mock.patch.object(lab, "save_curves"), \
                 mock.patch.object(lab, "spark_cli", return_value=1), \
+                mock.patch.object(lab, "plan_problems", return_value=[]), \
+                mock.patch.object(lab, "Telemetry", return_value=contextlib.nullcontext()), \
                 mock.patch.object(lab, "run_script") as script, \
                 mock.patch.object(lab.Path, "read_text", return_value='{"container": {"mounts": [], "image": "i"}}'), \
                 mock.patch.object(lab, "production_configuration", return_value=(

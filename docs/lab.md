@@ -77,6 +77,15 @@ ssh dgx1 'cd ~/projects/spark-ds41f && setsid -f scripts/lab.py run SPEC.json \
 A spec names the experiment directory, a run name and a list of jobs. A run opens a
 window if none of ours is open.
 
+Specs are checked before anything boots:
+- every arm configuration and script must exist;
+- the arguments of servebench extras (`scripts/servebench_run.py`, `_engine.py`,
+  `_model.py`) must parse with servebench's own parser.
+
+`queue add` refuses a spec that fails. One whose jobs start with a `sync` is only warned
+about, because its files may arrive with the sync; the run checks again after the sync,
+before the first boot. `run --dry-run` prints the problems.
+
 - **`measure`:** boots each arm with `cluster start --replace --change-shape`, with no
   stop in between, and measures it. The arm's node map must equal production's (below),
   so an arm can change context or KV size but never the node set.
@@ -120,6 +129,11 @@ window if none of ours is open.
 - **`kernel`:** runs kernel-lab bundles on the named nodes concurrently, with the cluster
   stopped. It writes `results/private/lab/<run>/verdicts.json` and checks that the
   nodes agree.
+- **Telemetry:** every bench and script step of a `measure` job samples each node's GPU
+  SM and memory clocks, power, temperature and clock-event reasons once a second
+  (`nvidia-smi` over SSH). The summary goes beside the step's output as
+  `<output>.telemetry.json`: percentiles per field, event-reason counts and the clock
+  lock in force. Telemetry never fails a step.
 - **`gpu_clocks`:** `{"kind": "gpu_clocks", "lock_mhz": [min, max]}` locks every node's
   GPU SM clock (`sudo -n nvidia-smi -lgc`) for the jobs that follow, and
   `{"kind": "gpu_clocks", "reset": true}` resets it (`-rgc`).
