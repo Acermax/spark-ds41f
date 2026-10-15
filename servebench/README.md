@@ -69,16 +69,25 @@ A suite is a fixed, named set of measurements, kept as data in
 [suites/](suites/): steps, each a servebench command (`model`, `engine`, `run`,
 `prefill`) with its arguments. Every build measured with a suite is measured the same way:
 - a run writes each step's result and `suite.json`, which records the suite and its
-  SHA-256;
-- `compare` on two run directories compares step by step;
+  SHA-256, plus whatever `--metadata FILE` holds (a JSON object, stored as given: the
+  cluster tooling records the deployment's identity there);
+- `compare` on two run directories compares step by step, and skips a step whose output
+  a run did not keep (a reference kept without the model step's text);
 - it refuses runs of different suites, so a changed suite is a new suite.
 
 Built in:
 - `screen`, about 18 minutes a build: model behaviour on 128 prompts (first, so it also
   heat-soaks the GPU), the engine grid, sixteen streams in a closed loop, and prefill at
   32K and 256K.
-- `release`, about 45 minutes: all 256 prompts, eight streams as well, and prefill from
-  32K to 1M.
+- `release` (version 2), about 51 minutes: all 256 prompts, eight streams as well,
+  Poisson arrivals at 0.7 requests/s (about 80% of sixteen streams' rate) with goodput
+  under a 2 s time to first token and 100 ms per output token, and prefill from 32K to
+  1M. Version 1 had no Poisson step.
+- `screen-tp3` and `release-tp3`: the same for a server of eight streams and 512K of
+  context. They run eight (and four) streams, the grid up to eight requests
+  (`--max-requests`), Poisson at 0.42 requests/s and prefill to 500K.
+
+Every built-in suite times the engine grid, so it needs a development server (below).
 
 `--corpus` makes model steps score another run's text, so builds compare on identical tokens.
 
@@ -108,8 +117,11 @@ depth)):
 Every build does identical work with no text, acceptance or scheduling in it, so the step
 times are the engine's speed. This is the measurement that judges kernel and engine changes
 at decode; tok/s judges what users get. It needs vLLM's dev-mode collective RPC
-(`VLLM_SERVER_DEV_MODE=1`) and a worker exposing `engine_grid`. It refuses a busy server
-and resets the prefix cache afterwards, since dummy steps write KV slots.
+(`VLLM_SERVER_DEV_MODE=1`) and a worker exposing `engine_grid`; a production server should
+not expose that RPC, so suites with a grid step run against a development server. It
+refuses a busy server and resets the prefix cache afterwards, since dummy steps write KV
+slots. `--max-requests` (the server's `--max-num-seqs`, default 16) leaves out shapes of
+more requests.
 
 - **Timing.** Each shape is warmed, then timed in rounds of alternating order (default
   100). Each timed step follows an untimed one of the same shape (`--settle`): switching

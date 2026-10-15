@@ -147,9 +147,16 @@ before the first boot. `run --dry-run` prints the problems.
 - **`kernel`:** runs kernel-lab bundles on the named nodes concurrently, with the cluster
   stopped. It writes `results/private/lab/<run>/verdicts.json` and checks that the
   nodes agree.
-- **`measure` with `"suite": "<name>"`** (servebench's `screen` or `release`, or a suite
-  file) replaces `extras`, `bench` and the profile. Each arm boots and runs
-  `scripts/servebench_suite.py` into `results/private/suites/<run>/<label>`. Arms after
+- **`measure` with `"suite": "<name>"`** (servebench's `screen`, `release`, `screen-tp3`
+  or `release-tp3`, or a suite file) replaces `extras`, `bench` and the profile. Each arm
+  boots and runs `bin/spark bench --suite <name> --compare none` into
+  `results/private/suites/<run>/<label>`. That brings every bench's conditions: the nodes
+  cooled, the fan performance curve running, the memory floor and temperature ceilings
+  watched (a breach stops the run), and the arm's identity in the run's `suite.json`
+  (`conditions.json` beside it records cooling, fan curve, thermal and memory). A failed
+  step lets the remaining arms run; a refused bench (exit 2: a cluster that differs from
+  its arm, no fan curve) ends the job. A suite with an engine grid step needs an arm with
+  `VLLM_SERVER_DEV_MODE=1`, which the pre-boot check enforces. Arms after
   the first score the first arm's text in model steps. The table
   (`scripts/servebench_suite_table.py`) compares the second arm, the reference, with
   every other arm, and the first arm with the last as the run's own repeat. Order arms

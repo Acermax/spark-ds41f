@@ -464,13 +464,25 @@ class PlanProblemsTest(unittest.TestCase):
         with mock.patch.object(lab, "head_url", return_value="http://h:8000"):
             steps = lab.plan(spec)
             self.assertEqual(lab.plan_problems(steps), [])
-        scripts = [s["argv"] for s in steps if s["kind"] == "script"]
-        self.assertEqual(scripts[0][-2:], ["--label", "cand"])
-        self.assertEqual(scripts[1][-2:], ["--corpus", "results/private/suites/s/cand/model.json.gz"])
+        # Each arm runs the suite through bin/spark bench (cooling, fan curve, identity).
+        benches = [s for s in steps if s["kind"] == "cli"]
+        self.assertEqual(benches[0]["argv"],
+                         ["--cluster-config", "experiments/2026-10-14-servebench/engine-r6k.json", "bench",
+                          "--suite", "screen", "--compare", "none", "--output", "results/private/suites/s/cand",
+                          "--label", "cand"])
+        self.assertEqual(benches[1]["argv"][-2:], ["--corpus", "results/private/suites/s/cand/model.json.gz"])
+        self.assertEqual(benches[0]["telemetry_out"], "results/private/determinism/s/suite-cand")
         self.assertEqual(steps[-1]["argv"], ["scripts/servebench_suite_table.py", "s", "cand", "base"])
         spec["jobs"][0]["suite"] = "no-such-suite"
         with mock.patch.object(lab, "head_url", return_value="http://h:8000"):
             self.assertTrue(lab.plan_problems(lab.plan(spec)))
+        # The engine grid needs the dev-mode collective RPC: refused before any boot.
+        spec["jobs"][0]["suite"] = "screen"
+        spec["jobs"][0]["arms"][1]["config"] = "experiments/2026-10-15-r6n/r6n-release.json"
+        with mock.patch.object(lab, "head_url", return_value="http://h:8000"):
+            problems = lab.plan_problems(lab.plan(spec))
+        self.assertEqual(problems, ["suite screen times the engine grid, but experiments/2026-10-15-r6n/r6n-release.json "
+                                    "lacks VLLM_SERVER_DEV_MODE=1 (the dev-mode collective RPC)"])
 
     def test_bad_arguments_missing_files_and_configs(self) -> None:
         spec = self.measure([["scripts/servebench_run.py", ["--mode", "sideways"], "c16"],

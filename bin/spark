@@ -5115,6 +5115,19 @@ def shape_text(shape: dict, keys: list[str]) -> str:
     return ", ".join(f"{key} {shape[key]}" for key in keys)
 
 
+def reference_identity(path: Path) -> dict:
+    """The identity a reference run records: a bench report's, or a servebench suite run's
+    (the metadata bench --suite stores in the run directory's suite.json)."""
+    if path.is_dir():
+        index = json.loads((path / "suite.json").read_text(encoding="utf-8"))
+        return (index.get("metadata") or {}).get("identity") or {}
+    return json.loads(path.read_text(encoding="utf-8")).get("identity") or {}
+
+
+def is_suite_run(path: Path) -> bool:
+    return (path / "suite.json").is_file()
+
+
 def benchmark_reference(cluster: dict) -> tuple[Path, bool]:
     """A profile's default reference run, and whether the profile names it. A
     profile whose topology differs from its baseline's reference run names its
@@ -5130,11 +5143,11 @@ def benchmark_reference_problems(cluster: dict, nodes: dict) -> list[str]:
     if raw is None:
         return []
     if not isinstance(raw, str) or not raw or Path(raw).is_absolute() or not (ROOT / raw).resolve().is_relative_to(ROOT):
-        return ["benchmark_reference must be a bench.json path relative to the repository root"]
+        return ["benchmark_reference must be a bench.json or suite run directory relative to the repository root"]
     path = ROOT / raw
-    if not path.is_file():
+    if not (path.is_file() or is_suite_run(path)):
         return [f"benchmark_reference does not exist: {raw}"]
-    reference = bench_shape(json.loads(path.read_text(encoding="utf-8")).get("identity") or {})
+    reference = bench_shape(reference_identity(path))
     profile = profile_shape(cluster, nodes)
     differing, unrecorded = shape_differences(profile, reference)
     problems: list[str] = []
@@ -5295,9 +5308,157 @@ def bench_rows(report: dict, reference: dict | None, tolerance: float) -> tuple[
     return lines, regressions
 
 
+# bench --suite exits 2 when it measured nothing (it refused), 1 when a step failed or the
+# run was halted (the other steps' results stand), 0 otherwise.
+SUITE_REFUSED, SUITE_FAILED = 2, 1
+
+
+def suite_reference(args: argparse.Namespace, cluster: dict, nodes: dict, definition: dict,
+                    digest: str) -> tuple[Path | None, str | None]:
+    """The suite run to compare with, or a reason to refuse. The default is the profile's
+    benchmark_reference when it is a run of the same suite and shape; a default of another
+    suite or shape is refused, an explicit one of another shape only warns."""
+    if args.compare == "none":
+        return None, None
+    if args.compare is None:
+        path, _ = benchmark_reference(cluster)
+        if not is_suite_run(path):
+            print(f"no suite run to compare with ({path.relative_to(ROOT) if path.is_relative_to(ROOT) else path} "
+                  "is not one)")
+            return None, None
+    else:
+        path = Path(args.compare) if Path(args.compare).is_absolute() else ROOT / args.compare
+        if not is_suite_run(path):
+            return None, f"--compare {args.compare} is not a suite run directory (no suite.json)"
+    shown = path.relative_to(ROOT) if path.is_relative_to(ROOT) else path
+    index = json.loads((path / "suite.json").read_text(encoding="utf-8"))
+    if index["suite_sha256"] != digest:
+        return None, (f"reference {shown} is a run of suite {index['suite']['name']} {index['suite_sha256'][:12]}, "
+                      f"this run's is {definition['name']} {digest[:12]}; a changed suite is a new suite: "
+                      "pass --compare with a run of this suite, or --compare none")
+    run, ref = profile_shape(cluster, nodes), bench_shape(reference_identity(path))
+    differing, unrecorded = shape_differences(run, ref)
+    if unrecorded:
+        print(f"WARN: cannot compare {', '.join(unrecorded)} with reference {shown}: not recorded")
+    if differing:
+        mismatch = f"reference {shown} was measured with {shape_text(ref, differing)}; this run has {shape_text(run, differing)}"
+        if args.compare is None:
+            return None, mismatch + "; name the profile's own run in benchmark_reference, or pass --compare"
+        print(f"WARN: {mismatch}")
+    return path, None
+
+
+def bench_suite(args: argparse.Namespace, cluster: dict, nodes: dict, config_name: str, config_path: Path) -> int:
+    """Run a servebench suite (servebench/suites/<name>.json or a JSON file) on the live service
+    under every bench's conditions: the nodes cooled, the fan performance curve running,
+    memory and temperatures watched (a breach stops the run), and the deployment's identity
+    stored in the run's suite.json. conditions.json beside it records the rest."""
+    sys.path.insert(0, str(ROOT))
+    from servebench import suite as servebench_suite
+
+    try:
+        definition = servebench_suite.load(args.suite)
+    except (OSError, ValueError) as error:
+        print(f"ERROR: {error}")
+        return SUITE_REFUSED
+    if servebench_suite.needs_dev_rpc(definition) and cluster.get("environment", {}).get("VLLM_SERVER_DEV_MODE") != "1":
+        print(f"ERROR: suite {definition['name']} times the engine grid, which needs the dev-mode collective RPC "
+              "(VLLM_SERVER_DEV_MODE=1); production does not expose it, so run the suite on a development arm "
+              "in a lab window")
+        return SUITE_REFUSED
+    digest = servebench_suite.digest(definition)
+    reference_path, refusal = suite_reference(args, cluster, nodes, definition, digest)
+    if refusal:
+        print(f"ERROR: {refusal}")
+        return SUITE_REFUSED
+    head = next(node for node in nodes["nodes"] if node["head"])
+    base = (args.url or f"http://{head['management_ip']}:{serve_arg(cluster, '--port')}").rstrip("/")
+    identity = bench_identity(cluster, nodes, config_name, config_path)
+    for warning in identity["live_warnings"]:
+        print(f"WARN: {warning}")
+    if identity["live_problems"]:
+        for problem in identity["live_problems"]:
+            print(f"ERROR: {problem}")
+        if not args.allow_mismatch:
+            print("refusing to benchmark a cluster that differs from its configuration")
+            return SUITE_REFUSED
+    output = Path(args.output) if args.output else ROOT / "results/private/suites" / time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    if not output.is_absolute():
+        output = ROOT / output
+    output.mkdir(parents=True, exist_ok=True)
+    conditions: dict = {"cooling": None, "fan_curve": []}
+    halted: list[str] = []
+    child: dict[str, subprocess.Popen] = {}
+
+    def halt(reason: str) -> None:
+        if halted:
+            return
+        halted.append(reason)
+        print(f"HALT: {reason}", flush=True)
+        if "process" in child and child["process"].poll() is None:
+            child["process"].send_signal(signal.SIGINT)
+
+    memory = MemoryWatch(nodes, float(cluster["host"]["memguard_gib"]) + 1, halt)
+    code = SUITE_REFUSED
+    try:
+        try:
+            conditions["cooling"] = cool_nodes(nodes, nodes["nodes"], args.cool_below, args.cool_timeout,
+                                               fan_control=fan_control_enabled(cluster))
+        except RuntimeError as error:
+            print(f"ERROR: cooling failed: {error}")
+            return SUITE_REFUSED
+        conditions["fan_curve"] = start_fan_curve(nodes, nodes["nodes"], fan_control=fan_control_enabled(cluster))
+        missing_curve = fan_curve_problems(conditions["fan_curve"])
+        if missing_curve:
+            print("ERROR: the fan performance curve is not running everywhere: " + "; ".join(missing_curve))
+            return SUITE_REFUSED
+        try:
+            memory.wait_ready()
+        except BenchAbort as error:
+            print(f"ERROR: {error}")
+            return SUITE_REFUSED
+        handle, metadata = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            json.dump({"identity": identity}, stream)
+        argv = [sys.executable, "-m", "servebench", "suite", base, "--suite", args.suite, "--out", str(output),
+                "--label", args.label or definition["name"], "--metadata", metadata]
+        if args.corpus:
+            argv += ["--corpus", args.corpus]
+        print(f"benchmarking {base} ({config_name}) with suite {definition['name']} {digest[:12]}; writing {output}",
+              flush=True)
+        try:
+            child["process"] = subprocess.Popen(argv, cwd=ROOT)
+            try:
+                returncode = child["process"].wait()
+            except KeyboardInterrupt:
+                halt("interrupted")
+                returncode = child["process"].wait()
+        finally:
+            os.unlink(metadata)
+        code = SUITE_FAILED if returncode or halted else 0
+    finally:
+        conditions["fan_stop_failures"] = stop_fan_curve(nodes, nodes["nodes"], conditions["fan_curve"])
+        conditions["thermal"] = memory.thermal_summary()
+        conditions["memory"] = memory.close()
+        conditions["halted"] = halted[0] if halted else None
+        (output / "conditions.json").write_text(json.dumps(conditions, indent=1) + "\n", encoding="utf-8")
+    for name, thermal in conditions["thermal"].items():
+        if thermal.get("thermal_slowdown_ms"):
+            print(f"FAIL: {name} spent {thermal['thermal_slowdown_ms']} ms in thermal slowdown; results are not comparable")
+            code = code or SUITE_FAILED
+    for failure in conditions["fan_stop_failures"]:
+        print(f"WARN: {failure}")
+    if reference_path:
+        subprocess.run([sys.executable, "-m", "servebench", "compare", str(reference_path), str(output)], cwd=ROOT)
+        print(f"reference: {reference_path}")
+    return code
+
+
 def command_bench(args: argparse.Namespace) -> int:
     cluster, nodes, _ = configuration(args)
     config_path, config_name = cluster_config_path(args)
+    if args.suite:
+        return bench_suite(args, cluster, nodes, config_name, config_path)
     if args.suites is None:
         args.suites = ",".join(FULL_SUITES) if args.full else "quality,decode"
     if args.min_samples is None:
@@ -5332,6 +5493,10 @@ def command_bench(args: argparse.Namespace) -> int:
     reference_path = None
     if args.compare is None:
         reference_path, named = benchmark_reference(cluster)
+        if is_suite_run(reference_path):
+            print(f"ERROR: benchmark_reference {cluster['benchmark_reference']} is a servebench suite run; "
+                  "compare with it through bench --suite, or pass --compare PATH (or --compare none)")
+            return 1
         if not reference_path.is_file():
             if named:
                 raise SystemExit(f"benchmark_reference does not exist: {cluster['benchmark_reference']}")
@@ -5662,6 +5827,17 @@ def parser() -> argparse.ArgumentParser:
         "the default is the quality gate and decode with 3-4 samples (about 6 minutes)",
     )
     bench.add_argument(
+        "--suite",
+        metavar="NAME",
+        help="run this servebench suite (servebench/suites/<NAME>.json, or a JSON file) instead of the "
+        "bench below, under the same cooling, fan curve, memory and temperature watch, with the "
+        "deployment's identity stored in the run; --output is the run directory (default "
+        "results/private/suites/<UTC time>); exits 2 when refused, 1 when a step failed",
+    )
+    bench.add_argument("--label", help="--suite: the run's name in tables (default: the suite's)")
+    bench.add_argument("--corpus", metavar="PATH",
+                       help="--suite: model steps score this earlier model result's text (the first arm's)")
+    bench.add_argument(
         "--suites",
         help="comma-separated subset of: " + ", ".join(BENCH_SUITES),
     )
@@ -5672,7 +5848,7 @@ def parser() -> argparse.ArgumentParser:
     bench.add_argument(
         "--compare",
         metavar="PATH",
-        help="reference bench.json (default: the profile's benchmark_reference, else "
+        help="reference bench.json, or with --suite a suite run directory (default: the profile's benchmark_reference, else "
         "manifests/benchmarks/<promoted_baseline>.json when present; a default measured on another "
         "node count, transport or kernel backend is refused, an explicit one only warns; "
         "'none' skips the comparison)",

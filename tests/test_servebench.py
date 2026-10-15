@@ -366,6 +366,11 @@ class EngineTest(unittest.TestCase):
         self.assertEqual(len(labels), len(set(labels)))
         self.assertIn("prefill 8192 @256K", [engine.label(s) for s in engine.default_shapes(5, 1048576, prefill=True)])
         self.assertNotIn("decode 1x3 rows @1016K", [engine.label(s) for s in engine.default_shapes(5, 262144)])
+        # Three nodes serve eight streams: no shape of more requests than the server takes.
+        tp3 = engine.default_shapes(5, 524288, max_requests=8)
+        self.assertEqual(max(s["num_reqs"] for s in tp3), 8)
+        self.assertIn("decode 1x3 rows @504K", [engine.label(s) for s in tp3])
+        self.assertEqual(len(tp3), 15)  # 6 at depths 1-2, 4 at full depth, 2 at 64K, 2 at 256K, 1 longest
 
     def test_grid_run_summary_and_compare(self):
         fast, slow = FakeServer(1.0), FakeServer(1.05)
@@ -479,11 +484,31 @@ class SuiteTest(unittest.TestCase):
         {"id": "prefill", "command": "prefill", "args": {"sizes": [2000, 4000], "repeats": 2}}]}
 
     def test_builtin_suites_parse(self):
-        for name in ("screen", "release"):
+        for name in ("screen", "release", "screen-tp3", "release-tp3"):
             definition = suite.load(name)
             for step in definition["steps"]:
                 with self.subTest(suite=name, step=step["id"]):
                     cli.build_parser().parse_args(suite.arguments(step, "http://x", "/tmp/o.json", "l", "/tmp/c.json.gz"))
+
+    def test_tp3_suites_fit_three_nodes(self):
+        """Eight streams and 512K of context: no step asks for more."""
+        for name in ("screen-tp3", "release-tp3"):
+            for step in suite.load(name)["steps"]:
+                with self.subTest(suite=name, step=step["id"]):
+                    args = step["args"]
+                    self.assertLessEqual(args.get("concurrency", 1), 8)
+                    if step["command"] == "engine":
+                        self.assertEqual(args["max_requests"], 8)
+                    self.assertTrue(all(size <= 524288 - 1024 for size in args.get("sizes", [])))
+
+    def test_release_measures_open_loop_goodput(self):
+        poisson = next(s for s in suite.load("release")["steps"] if s["id"] == "poisson")
+        self.assertEqual((poisson["args"]["mode"], poisson["args"]["slo_ttft"], poisson["args"]["slo_tpot"]),
+                         ("poisson", 2, 100))
+
+    def test_dev_rpc_need(self):
+        self.assertTrue(suite.needs_dev_rpc(self.TINY))
+        self.assertFalse(suite.needs_dev_rpc({"name": "x", "steps": [s for s in self.TINY["steps"] if s["id"] != "grid"]}))
 
     def test_arguments(self):
         step = {"id": "p", "command": "prefill", "args": {"sizes": [1, 2], "repeats": 3, "no_vllm": True,
@@ -517,17 +542,27 @@ class SuiteTest(unittest.TestCase):
                 definition = os.path.join(tmp, "tiny.json")
                 Path(definition).write_text(json.dumps(self.TINY))
                 base, cand = os.path.join(tmp, "base"), os.path.join(tmp, "cand")
-                self.assertEqual(cli.main(["suite", servers[0].url, "--suite", definition, "--out", base, "--label", "base"]), 0)
+                metadata = os.path.join(tmp, "metadata.json")
+                Path(metadata).write_text(json.dumps({"identity": {"transport": "oneshot-ring4"}}))
+                self.assertEqual(cli.main(["suite", servers[0].url, "--suite", definition, "--out", base, "--label", "base",
+                                           "--metadata", metadata]), 0)
                 self.assertEqual(cli.main(["suite", servers[1].url, "--suite", definition, "--out", cand, "--label", "cand",
                                            "--corpus", os.path.join(base, "model.json.gz")]), 0)
                 index = json.loads(Path(base, "suite.json").read_text())
                 self.assertEqual([s["exit"] for s in index["steps"]], [0, 0, 0, 0])
                 self.assertEqual(index["suite_sha256"], suite.digest(self.TINY))
+                self.assertEqual(index["metadata"], {"identity": {"transport": "oneshot-ring4"}})
+                self.assertNotIn("metadata", json.loads(Path(cand, "suite.json").read_text()))
                 result = suite.compare(cli.read_json, base, cand, lambda b, c: cli.compare_results(b, c, 3.0))
                 self.assertEqual(list(result["steps"]), ["model", "grid", "c2", "prefill"])
                 self.assertEqual(result["steps"]["model"][0], behaviour.SCHEMA)
                 self.assertEqual(result["steps"]["prefill"][0], prefill.SCHEMA)
                 self.assertEqual(len(result["steps"]["prefill"][1]["rows"]), 2)
+                # A reference kept without the model step's text compares everything else.
+                os.rename(os.path.join(base, "model.json.gz"), os.path.join(tmp, "model.json.gz"))
+                kept = suite.compare(cli.read_json, base, cand, lambda b, c: cli.compare_results(b, c, 3.0))
+                self.assertIn("not kept", kept["steps"]["model"]["skipped"])
+                self.assertEqual(kept["steps"]["prefill"][0], prefill.SCHEMA)
                 changed = json.loads(Path(cand, "suite.json").read_text())
                 changed["suite_sha256"] = "0" * 64
                 Path(cand, "suite.json").write_text(json.dumps(changed))

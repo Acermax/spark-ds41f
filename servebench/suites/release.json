@@ -1,7 +1,7 @@
 {
  "name": "release",
- "version": 1,
- "description": "Release measurement, about 45 minutes a build: the screen with all 256 prompts, eight streams as well, and real-text prefill from 32K to 1M.",
+ "version": 2,
+ "description": "Release measurement, about 51 minutes a build: the screen with all 256 prompts, eight streams as well, Poisson arrivals at 0.7 requests/s (about 80% of sixteen streams' rate) with goodput under a 2 s time to first token and 100 ms per output token, and real-text prefill from 32K to 1M. Its grid needs the dev-mode collective RPC.",
  "steps": [
   {
    "id": "model",
@@ -43,6 +43,23 @@
     "concurrency": 8,
     "warmup": 60,
     "duration": 300,
+    "extra_body": {
+     "chat_template_kwargs": {
+      "thinking": false
+     }
+    }
+   }
+  },
+  {
+   "id": "poisson",
+   "command": "run",
+   "args": {
+    "mode": "poisson",
+    "rate": 0.7,
+    "warmup": 60,
+    "duration": 300,
+    "slo_ttft": 2,
+    "slo_tpot": 100,
     "extra_body": {
      "chat_template_kwargs": {
       "thinking": false

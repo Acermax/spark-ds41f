@@ -60,11 +60,10 @@ next re-cable.
    identity (its tree labels) to the key and keep one cache directory: a new build
    profiles itself on its first boot and reuses its curves after. Do it before the TP3
    release, whose curves are the stalest.
-7. **A suite run as the benchmark reference.** r6n was promoted on its servebench
-   release suite, so `tp4-ring`'s `benchmark_reference` (the run `bin/spark bench`
-   compares with) is still r6k's bench run. Let `benchmark_reference` name a suite run
-   and compare a new suite run with it, or retire `bin/spark bench`'s default
-   comparison once every release runs the suite.
+7. **Retire the old bench's measurements.** servebench suites decide releases and are the
+   benchmark reference (2026-10-15). Remove `bin/spark bench`'s own suites (single-prompt
+   decode points that move with the text, burst distinct streams, the quality gate's
+   prompts) and the lab's `release` bench profile once nothing in a current job uses them.
 8. Merge sparknet `timeout-stop` (on `tilelang-only`) into sparknet's main and tag it:
    production now runs it from the branch.
 

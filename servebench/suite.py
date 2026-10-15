@@ -8,6 +8,12 @@ runs of different suites: a change to a suite is a new suite.
 
 ``model`` steps can score another run's text: ``corpus`` (a path, or the first arm's
 model result when the lab passes ``--corpus``) makes every build score the same tokens.
+
+``metadata`` is recorded in ``suite.json`` as given and never read here: a caller that knows
+the deployment (its image, topology, configuration) stores it beside the measurements.
+
+``engine`` steps need the server's dev-mode collective RPC (``needs_dev_rpc``), which a
+production server should not expose: a suite with one runs against a development server.
 """
 
 import datetime
@@ -44,6 +50,11 @@ def check(suite: dict) -> list[str]:
     return problems
 
 
+def needs_dev_rpc(suite: dict) -> bool:
+    """Whether a step times the engine grid, which needs the dev-mode collective RPC."""
+    return any(step["command"] == "engine" for step in suite["steps"])
+
+
 def digest(suite: dict) -> str:
     return hashlib.sha256(json.dumps(suite, sort_keys=True).encode()).hexdigest()
 
@@ -76,12 +87,14 @@ def output_name(step: dict) -> str:
 
 
 def run(main, url: str, suite: dict, out_dir: str, *, label: str | None = None, corpus: str | None = None,
-        log=print) -> dict:
+        metadata: dict | None = None, log=print) -> dict:
     """Run every step through servebench's ``main`` and write ``suite.json``."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     index = {"schema": SCHEMA, "suite": suite, "suite_sha256": digest(suite), "label": label, "corpus": corpus,
              "started_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"), "steps": []}
+    if metadata is not None:
+        index["metadata"] = metadata
     for step in suite["steps"]:
         output = str(out / output_name(step))
         began = time.monotonic()
@@ -108,6 +121,12 @@ def compare(read_json, base_dir: str, candidate_dir: str, compare_one) -> dict:
     for b, c in zip(base["steps"], candidate["steps"]):
         if b["exit"] != 0 or c["exit"] != 0:
             steps[b["id"]] = {"skipped": f"exit {b['exit']} / {c['exit']}"}
+            continue
+        # A run kept as a reference may leave out a large output (the model step's text).
+        missing = [str(Path(d) / r["output"]) for d, r in ((base_dir, b), (candidate_dir, c))
+                   if not (Path(d) / r["output"]).is_file()]
+        if missing:
+            steps[b["id"]] = {"skipped": "not kept: " + ", ".join(missing)}
             continue
         steps[b["id"]] = compare_one(read_json(str(Path(base_dir) / b["output"])),
                                      read_json(str(Path(candidate_dir) / c["output"])))

@@ -804,9 +804,11 @@ def measure_steps(spec: dict, job: dict) -> list[dict]:
 
 
 def suite_steps(spec: dict, job: dict, arms: list[dict]) -> list[dict]:
-    """A measure job with "suite": each arm boots and runs the servebench suite into
-    results/private/suites/<run>/<label>; arms after the first score the first arm's text
-    in model steps; the table compares the arms' suite runs."""
+    """A measure job with "suite": each arm boots and runs the servebench suite through
+    bin/spark bench --suite (cooled nodes, the fan performance curve, the memory and
+    temperature watch, the arm's identity in the run) into results/private/suites/<run>/<label>;
+    arms after the first score the first arm's text in model steps; the table compares the
+    arms' suite runs. A failed step leaves the other arms to run; a refused bench ends the job."""
     experiment, run = spec["experiment"], spec["run"]
     first = f"results/private/suites/{run}/{arms[0]['label']}/model.json.gz"
     steps = []
@@ -815,16 +817,15 @@ def suite_steps(spec: dict, job: dict, arms: list[dict]) -> list[dict]:
         steps.append(boot_step(run, arm, config))
         steps.append({"kind": "curves", "label": label, "config": config,
                       "out": f"results/private/determinism/{run}/curves-{label}.json"})
-        argv = ["scripts/servebench_suite.py", head_url(), "--suite", job["suite"],
-                "--out", f"results/private/suites/{run}/{label}", "--label", label]
+        argv = ["--cluster-config", config, "bench", "--suite", job["suite"], "--compare", "none",
+                "--output", f"results/private/suites/{run}/{label}", "--label", label]
         if index:
             argv += ["--corpus", first]
-        steps.append({"kind": "script", "label": label, "argv": argv, "telemetry": job.get("telemetry", True),
-                      "out": f"results/private/determinism/{run}/suite-{label}.jsonl"})
+        steps.append({"kind": "cli", "label": label, "argv": argv, "suite": job["suite"],
+                      "telemetry_out": f"results/private/determinism/{run}/suite-{label}"})
     steps.append({"kind": "table", "argv": ["scripts/servebench_suite_table.py", run, *[a["label"] for a in arms]],
                   "out": f"results/private/lab/{run}-table.txt",
-                  "curves": [f"results/private/determinism/{run}/curves-{a['label']}.json" for a in arms],
-                  "summaries": [f"results/private/determinism/{run}/suite-{a['label']}.jsonl" for a in arms]})
+                  "curves": [f"results/private/determinism/{run}/curves-{a['label']}.json" for a in arms]})
     return steps
 
 
@@ -951,6 +952,8 @@ def plan_problems(steps: list[dict]) -> list[str]:
     for step in steps:
         if step["kind"] == "boot" and not (ROOT / step["config"]).is_file():
             problems.append(f"arm configuration {step['config']} does not exist")
+        if step["kind"] == "cli" and step.get("suite"):
+            problems.extend(suite_problems(step))
         if step["kind"] not in ("script", "profile"):
             continue
         script, args = step["argv"][0], step["argv"][1:]
@@ -973,6 +976,30 @@ def plan_problems(steps: list[dict]) -> list[str]:
             except (ValueError, OSError) as error:
                 problems.append(f"{script} {shlex.join(args[1:])}: {error}")
     return list(dict.fromkeys(problems))
+
+
+def suite_problems(step: dict) -> list[str]:
+    """A bench --suite step: the suite and every step's servebench arguments parse, and a
+    suite that times the engine grid runs on an arm with the dev-mode collective RPC."""
+    sys.path.insert(0, str(ROOT))
+    from servebench import suite
+    from servebench.__main__ import build_parser
+    config = step["argv"][step["argv"].index("--cluster-config") + 1]
+    errors = io.StringIO()
+    try:
+        definition = suite.load(step["suite"])
+        with contextlib.redirect_stderr(errors):
+            for suite_step in definition["steps"]:
+                build_parser().parse_args(suite.arguments(suite_step, "http://head:8000", "o.json", "l", None))
+    except SystemExit:
+        return [f"suite {step['suite']}: {errors.getvalue().strip().splitlines()[-1]}"]
+    except (ValueError, OSError) as error:
+        return [f"suite {step['suite']}: {error}"]
+    if (ROOT / config).is_file() and suite.needs_dev_rpc(definition):
+        if spark.read_cluster(config).get("environment", {}).get("VLLM_SERVER_DEV_MODE") != "1":
+            return [f"suite {step['suite']} times the engine grid, but {config} lacks VLLM_SERVER_DEV_MODE=1 "
+                    "(the dev-mode collective RPC)"]
+    return []
 
 
 def plan(spec: dict) -> list[dict]:
@@ -1528,11 +1555,16 @@ def execute(spec: dict, dry: bool, keep_open: bool, close_on_failure: bool = Tru
                     break
             elif step["kind"] == "cli":
                 # A bench refuses a cluster that differs from its arm; that ends the job.
-                with Telemetry(step["argv"][step["argv"].index("--output") + 1] if "--output" in step["argv"]
-                               else f"results/private/lab/{spec['run']}-{step['label']}-bench"):
+                with Telemetry(step.get("telemetry_out")
+                               or (step["argv"][step["argv"].index("--output") + 1] if "--output" in step["argv"]
+                                   else f"results/private/lab/{spec['run']}-{step['label']}-bench")):
                     code = spark_cli(*step["argv"])
                 log(f"bench {step['label']} exit {code}")
-                if code:
+                if code == 1 and step.get("suite"):
+                    # A suite step failed or the run was halted: keep its other results and
+                    # measure the remaining arms.
+                    save_engine_logs(f"results/private/suites/{spec['run']}/{step['label']}")
+                elif code:
                     failed = f"bench {step['label']} exited {code}"
                     break
             elif step["kind"] == "script":
