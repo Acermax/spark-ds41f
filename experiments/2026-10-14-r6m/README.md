@@ -60,8 +60,11 @@ image, the trees, the lock, `SPARK3_ENGRAM_ASYNC` (retired) and `SPARKNET_ROCE_K
    hang (r6k hung on 2 of 2).
    [qualify-boots.json](qualify-boots.json) repeats qualify's boots, most important
    first (the delay boots, the traced boots, then the cold cache): a failed boot ends a
-   run, and the cold-cache boot failed on 2026-10-15 (dgx2's rank exited 1 right after
-   its engine started; the plain arm boots).
+   run. On 2026-10-15 the cold-cache boot failed at setup on every rank: sparknet's
+   TileLang trace clock (on in that arm and the traced arms) postpones its annotations,
+   so TileLang cannot resolve the probe's symbolic shape (`NameError: name 'n' is not
+   defined`; fixed in sparknet 3bc8d10). These boots run without the trace: the
+   first-request boots on the release arm, the cold cache without `SPARKNET_ROCE_TRACE`.
 3. [release.json](release.json): the release suite against r6k.
 
 TP3 follows once these pass: see experiments/2026-10-14-one-recipe ("Releasing TP3").
