@@ -26,7 +26,8 @@
    "script": "failstop.py",
    "label": "failstop-eager",
    "environment": {
-    "FAILSTOP_SCENARIO": "eager"
+    "FAILSTOP_SCENARIO": "eager",
+    "SPARKNET_ROCE_ALLREDUCE_DISPATCH_MAX_BYTES": "1048576"
    }
   },
   {
@@ -35,7 +36,8 @@
    "script": "failstop.py",
    "label": "failstop-graph",
    "environment": {
-    "FAILSTOP_SCENARIO": "graph"
+    "FAILSTOP_SCENARIO": "graph",
+    "SPARKNET_ROCE_ALLREDUCE_DISPATCH_MAX_BYTES": "1048576"
    }
   },
   {
