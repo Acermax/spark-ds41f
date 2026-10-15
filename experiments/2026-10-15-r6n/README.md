@@ -42,3 +42,13 @@ Source: vLLM tree `0c60314d` (patch head `b1309b4a`, as the build replays it), s
    The owner decides promotion.
 
 TP3 follows once these pass: see experiments/2026-10-14-one-recipe ("Releasing TP3").
+
+## Credits
+
+huxiaofengtiger reported r6h's TP3 startup failures on the NVIDIA Developer Forums
+(the DeepSeek 4.1 Flash recipe thread, post 16, 2026-10-14). The report included the
+deployment commit, image, kernel, driver and file hashes, and per-rank timings: an 83 s
+cold-JIT skew between ranks that tripped the one-shot collectives' spin limit and the
+Engram reader's 20 s deadline. They also tested a monitored barrier after local JIT
+warmup on their own nodes. The startup rendezvous (vLLM 0143), the fail-stop timeouts
+and the cold-cache qualification boot carried into r6n follow from that report.
