@@ -1,12 +1,11 @@
 {
-  "notes": "r6m with sparknet's per-op trace and the async Engram trace, for the first-request crash repro.",
+  "notes": "r6m with sparknet's per-op trace, for the first-request repro.",
   "extends": {
     "config": "experiments/2026-10-14-r6m/r6m-release.json"
   },
   "set": {
     "environment": {
-      "SPARKNET_ROCE_TRACE": "1",
-      "SPARK3_ENGRAM_ASYNC_TRACE": "1"
+      "SPARKNET_ROCE_TRACE": "1"
     }
   }
 }

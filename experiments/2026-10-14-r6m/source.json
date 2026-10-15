@@ -4,10 +4,10 @@
  "vllm": {
   "base_revision": "19f2c20ed4d64ae22bd009ceacadd85e2a81e354",
   "patch_series": "experiments/2026-10-14-r6m/vllm/series",
-  "patchset_sha256": "df89f6ade6f6ff9b909860e3d77775d6aa284362f865430092a82bcbf2dbbcf2",
-  "expected_tree": "5e985c3463bade85241cabf26d5998e3273fe298",
+  "patchset_sha256": "3b242d42035b87172f8070b2884cbfc56546f6f312981f70675d8714840c16b6",
+  "expected_tree": "55e1367ef0319eab9c654e1adbfedfc8eb87a850",
   "verification": "bin/spark build prepare applies the series to the pinned revision and checks this patch head and tree; image label local.spark3.vllm.tree matches",
-  "patch_head": "0285d3ff263a3d480735c089cf82e7d986d87585",
+  "patch_head": "a10879ff6f1ffb1aeeeb6b1e5d1154e4cf1b3246",
   "capabilities": [
    "packed-bf16-lm-head",
    "streamed-vocabulary-weights",
@@ -48,7 +48,9 @@
    "tilelang-wo-fused-cast",
    "roce-policy-no-fallback",
    "sparknet-fail-stop-cause",
-   "startup-rendezvous"
+   "startup-rendezvous",
+   "draft-budget-eager",
+   "engram-native-disk-rows"
   ]
  },
  "b12x": {

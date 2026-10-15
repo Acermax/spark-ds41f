@@ -6,6 +6,15 @@
    "kind": "sync"
   },
   {
+   "kind": "kernel",
+   "bundles": [
+    {
+     "node": "dgx4",
+     "bundle": "experiments/2026-10-14-r6m/bundles/engram-tests"
+    }
+   ]
+  },
+  {
    "kind": "fabric",
    "config": "r6m-release.json",
    "script": "scripts/probe_collectives.py",
@@ -300,6 +309,50 @@
       "results/private/r6m/first-request/{label}"
      ],
      "collect"
+    ]
+   ]
+  },
+  {
+   "kind": "measure",
+   "bench": false,
+   "bracket": false,
+   "telemetry": false,
+   "arms": [
+    {
+     "config": "r6m-delay.json",
+     "label": "d1"
+    }
+   ],
+   "extras": [
+    [
+     "experiments/2026-10-15-engram-stall/stall_probe.py",
+     [
+      "--out",
+      "results/private/r6m/delay/{label}"
+     ],
+     "probe"
+    ]
+   ]
+  },
+  {
+   "kind": "measure",
+   "bench": false,
+   "bracket": false,
+   "telemetry": false,
+   "arms": [
+    {
+     "config": "r6m-delay.json",
+     "label": "d2"
+    }
+   ],
+   "extras": [
+    [
+     "experiments/2026-10-15-engram-stall/stall_probe.py",
+     [
+      "--out",
+      "results/private/r6m/delay/{label}"
+     ],
+     "probe"
     ]
    ]
   }

@@ -139,3 +139,5 @@
 0141-TileLang-V4.1-tests-the-routed-experts-keep-a-NaN-Ti.patch
 0142-RoCE-policy-no-fallback-in-any-collective.patch
 0143-One-shot-collectives-name-a-stopped-collective-rende.patch
+0144-Adaptive-verification-run-the-draft-budget-eagerly-r.patch
+0145-DeepSeek-V4.1-Engram-read-disk-rows-with-a-native-wo.patch

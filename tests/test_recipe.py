@@ -126,7 +126,8 @@ class OverlayTest(unittest.TestCase):
         r6m = spark.read_cluster("experiments/2026-10-14-r6m/r6m-release.json")
         self.assertEqual({k for k in set(r6l["environment"]) | set(r6m["environment"])
                           if r6l["environment"].get(k) != r6m["environment"].get(k)},
-                         {"SPARKNET_ROCE_KERNELS", "SPARKNET_ROCE_SPIN_LIMIT", "SPARKNET_ROCE_TIMEOUT_MS"})
+                         {"SPARKNET_ROCE_KERNELS", "SPARKNET_ROCE_SPIN_LIMIT", "SPARKNET_ROCE_TIMEOUT_MS",
+                          "SPARK3_ENGRAM_ASYNC"})
         self.assertEqual(r6m["serve_args"], r6l["serve_args"])
         self.assertEqual({k: v for k, v in r6m.items() if k not in ("container", "environment", "upstreams_config")},
                          {k: v for k, v in r6l.items() if k not in ("container", "environment", "upstreams_config")})
