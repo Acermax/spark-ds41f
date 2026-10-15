@@ -6,7 +6,7 @@ service after every run. It replaces the copy-and-edit `runNN.sh` pattern.
 ## Windows
 
 ```sh
-scripts/lab.py window open --note "mHC screen" --production-config config/cluster-tp4.json
+scripts/lab.py window open --note "mHC screen"
 scripts/lab.py window status
 scripts/lab.py window close
 ```
@@ -45,8 +45,10 @@ cluster action in the window uses its node map: stop, sync, `doctor --live`, the
 guard and the node-map check before each boot.
 
 - `--production-config PATH` selects it on `window open`, `window close`, `run` and
-  `queue run`. The default is `config/cluster.json` (TP3 triangle). While the four-node
-  ring serves TP4, pass `config/cluster-tp4.json`.
+  `queue run`. The default is the recipe `config/cluster.json` at the site's shape
+  (`bin/spark site shape`), which is right whatever the cabling. Name another file only
+  to restore an archived release, such as a shape's previous production record while
+  the recipe's image is not yet qualified on it.
 - `open` writes it to the hold file as `production_config`. The commands that follow
   use that record: `close`, the watchdog, runs inside the window and a queue runner
   restarted by a sync job.
@@ -64,6 +66,22 @@ scripts/lab.py run scripts/lab_specs/lab1-first-window.json --dry-run
 scripts/lab.py run scripts/lab_specs/lab1-first-window.json
 ```
 
+**Arms are overlays.** An arm configuration names what it extends and holds only what it
+changes, so it cannot drift from what it is compared with:
+
+```json
+{
+  "extends": {"config": "config/cluster.json", "shape": "tp4-ring"},
+  "set": {"container": {"image": "vllm-ds41f-kkref:...-r6m"}, "environment": {"NAME": "value"}},
+  "unset": ["environment.OLD_NAME"]
+}
+```
+
+`extends` may name another arm (a dev arm extends its release arm); an arm of the recipe
+must name its shape. `set` merges into the base, `unset` removes dotted paths (an unset
+the base does not have is an error). An arm never carries the recipe's shape or
+qualifying benchmark. Older experiments keep their complete files.
+
 Over ssh, detach a long `run` or `queue run` from the session: use `setsid -f` with every
 stream redirected, or run it inside tmux. `lab.py` logs to stdout. If stdout is the session's
 pipe and the session ends, the next log line fails with a broken pipe and the runner exits.
@@ -71,7 +89,7 @@ The heartbeat then stops and the watchdog closes the window 15 minutes later.
 
 ```sh
 ssh dgx1 'cd ~/projects/spark-ds41f && setsid -f scripts/lab.py run SPEC.json \
-  --production-config config/cluster-tp4.json > results/private/lab/SPEC.log 2>&1 < /dev/null'
+  > results/private/lab/SPEC.log 2>&1 < /dev/null'
 ```
 
 A spec names the experiment directory, a run name and a list of jobs. A run opens a
@@ -114,7 +132,7 @@ before the first boot. `run --dry-run` prints the problems.
   sync before running it.
 
   ```sh
-  scripts/lab_sweep.py --base config/cluster-tp4.json --variable VLLM_L2_PREFETCH_GRID \
+  scripts/lab_sweep.py --base config/cluster.json --shape tp4-ring --variable VLLM_L2_PREFETCH_GRID \
     --values 1,2,3,6 --experiment experiments/<dir> --run <name> --streams 1,4,16
   ```
 - **`validate`:** a trace arm.

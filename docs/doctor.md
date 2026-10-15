@@ -8,8 +8,8 @@ the fix is printed as a command for you to run.
 Select a profile the same way as for every other command:
 
 ```sh
-bin/spark doctor                                           # config/cluster.json
-bin/spark --cluster-config config/cluster-tp4.json doctor  # the TP4 profile
+bin/spark doctor                       # config/cluster.json at the site's shape
+bin/spark --shape tp3-triangle doctor  # the recipe at another shape
 ```
 
 ## Modes
@@ -103,7 +103,7 @@ These compare each node with the kernel policy in
 | **The selected profile's kernel requirements**: the running kernel and page size equal the profile's `host.kernel`; for a profile with `memory_saver_required`, the memory saver is loaded with packing on and the driver is 580.178.04 | error |
 | All nodes agree on kernel, page size, driver, loaded NVIDIA module sources, packing, THP, free-memory reserve, Secure Boot state and CPU governors | error |
 
-The 4 KiB profile (`config/cluster-4k.json`) requires only the 4 KiB kernel,
+The 4 KiB shape (`tp3-triangle-4k`) requires only the 4 KiB kernel,
 so on that profile the memory-saver lines stay warnings.
 
 ### Fabric

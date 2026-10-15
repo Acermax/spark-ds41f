@@ -583,11 +583,11 @@ class BenchAbortCleanupTest(unittest.TestCase):
     def test_aborted_bench_saves_its_report_with_and_without_fan_control(self) -> None:
         for fan_control in (True, False):
             with self.subTest(fan_control=fan_control), tempfile.TemporaryDirectory() as tmp:
-                cluster = spark.read_json("config/cluster-tp4.json")
+                cluster = spark.read_cluster("config/cluster.json", "tp4-ring")
                 cluster["host"]["fan_control"] = fan_control
                 nodes = spark.read_json("config/examples/nodes-ring4.json")
                 options = spark.parser().parse_args(
-                    ["--cluster-config", "config/cluster-tp4.json", "bench", "--compare", "none", "--output", tmp])
+                    ["--cluster-config", "config/cluster.json", "bench", "--compare", "none", "--output", tmp])
                 identity = {"live_warnings": [], "live_problems": []}
                 bench = mock.Mock(discarded=[])
                 bench.memory.thermal_summary.return_value = {}
@@ -617,8 +617,8 @@ class ReferenceShapeTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
 
-    def profile(self, name: str) -> tuple[dict, dict]:
-        cluster = spark.read_json(name)
+    def profile(self, name: str, shape: str | None = None) -> tuple[dict, dict]:
+        cluster = spark.read_cluster(name, shape)
         return cluster, spark.read_json(self.EXAMPLE_NODES[spark.serve_arg(cluster, "--tensor-parallel-size")])
 
     def report(self, cluster: dict, nodes: dict) -> str:
@@ -640,13 +640,17 @@ class ReferenceShapeTest(unittest.TestCase):
             status = options.func(options)
         return status, output.getvalue()
 
-    def test_promoted_profiles_default_to_a_reference_of_their_shape(self) -> None:
-        for path in sorted((ROOT / "config").glob("cluster*.json")):
-            name = path.relative_to(ROOT).as_posix()
-            with self.subTest(profile=name):
-                cluster, nodes = self.profile(name)
-                reference, _ = spark.benchmark_reference(cluster)
-                self.assertTrue(reference.is_file())
+    def test_qualified_shapes_name_a_reference_of_their_shape(self) -> None:
+        recipe = spark.read_json("config/cluster.json")
+        for shape, entry in sorted(recipe["shapes"].items()):
+            with self.subTest(shape=shape):
+                cluster, nodes = self.profile("config/cluster.json", shape)
+                if "benchmark_reference" not in entry:
+                    # Not yet benched with the recipe's image: no reference, and no production start.
+                    self.assertNotIn("benchmark_reference", cluster)
+                    continue
+                reference, named = spark.benchmark_reference(cluster)
+                self.assertTrue(named and reference.is_file())
                 relative = reference.relative_to(ROOT)
                 self.assertEqual(relative.parent.as_posix(), "manifests/benchmarks")
                 # A promotion that moves promoted_baseline moves the reference too.
@@ -657,51 +661,52 @@ class ReferenceShapeTest(unittest.TestCase):
                     ([], []),
                 )
                 self.assertEqual(spark.benchmark_reference_problems(cluster, nodes), [])
+        self.assertIn("benchmark_reference", recipe["shapes"]["tp4-ring"])
 
     def test_tp4_profile_compares_with_the_tp4_run(self) -> None:
-        cluster, nodes = self.profile("config/cluster-tp4.json")
+        cluster, nodes = self.profile("config/cluster.json", "tp4-ring")
         self.assertEqual(cluster["benchmark_reference"], self.TP4_REFERENCE)
-        status, output = self.bench("config/cluster-tp4.json", cluster, nodes, "--report", self.report(cluster, nodes))
+        status, output = self.bench("config/cluster.json", cluster, nodes, "--report", self.report(cluster, nodes))
         self.assertEqual(status, 0)
         self.assertIn(f"reference: {ROOT / self.TP4_REFERENCE}", output)
         self.assertNotIn("WARN", output)
         self.assertNotIn("ERROR", output)
         cluster["benchmark_reference"] = "manifests/benchmarks/missing.json"
         with self.assertRaisesRegex(SystemExit, "benchmark_reference does not exist: manifests/benchmarks/missing.json"):
-            self.bench("config/cluster-tp4.json", cluster, nodes, "--report", self.report(cluster, nodes))
+            self.bench("config/cluster.json", cluster, nodes, "--report", self.report(cluster, nodes))
 
     def test_default_reference_of_another_shape_is_refused(self) -> None:
         # Without its own reference the TP4 profile falls back to the baseline's
         # three-node run. Refuse it both live, before contacting the cluster,
         # and for a saved report.
-        cluster, nodes = self.profile("config/cluster-tp4.json")
+        cluster, nodes = self.profile("config/cluster.json", "tp4-ring")
         del cluster["benchmark_reference"]
-        # On the TP3 profiles' baseline, whose default reference is its three-node run.
-        cluster["promoted_baseline"] = spark.read_json("config/cluster.json")["promoted_baseline"]
+        # On r6h's baseline, whose default reference is its three-node run.
+        cluster["promoted_baseline"] = Path(self.TP3_REFERENCE).stem
         for argv in ([], ["--report", self.report(cluster, nodes)]):
             with self.subTest(argv=argv):
-                status, output = self.bench("config/cluster-tp4.json", cluster, nodes, *argv)
+                status, output = self.bench("config/cluster.json", cluster, nodes, *argv)
                 self.assertEqual(status, 1)
                 self.assertIn(f"ERROR: reference {self.TP3_REFERENCE} {self.TP4_MISMATCH.format('run')}\n", output)
                 self.assertIn("refusing to compare with a default reference of another shape", output)
                 self.assertIn("--compare PATH", output)
 
     def test_explicit_reference_of_another_shape_only_warns(self) -> None:
-        cluster, nodes = self.profile("config/cluster-tp4.json")
+        cluster, nodes = self.profile("config/cluster.json", "tp4-ring")
         report = self.report(cluster, nodes)
         status, output = self.bench(
-            "config/cluster-tp4.json", cluster, nodes, "--report", report, "--compare", self.TP3_REFERENCE
+            "config/cluster.json", cluster, nodes, "--report", report, "--compare", self.TP3_REFERENCE
         )
         self.assertEqual(status, 0)
         self.assertIn(f"WARN: reference {self.TP3_REFERENCE} {self.TP4_MISMATCH.format('run')}\n", output)
         self.assertIn(f"reference: {ROOT / self.TP3_REFERENCE}", output)
         self.assertNotIn("ERROR", output)
-        status, output = self.bench("config/cluster-tp4.json", cluster, nodes, "--report", report, "--compare", "none")
+        status, output = self.bench("config/cluster.json", cluster, nodes, "--report", report, "--compare", "none")
         self.assertEqual(status, 0)
         self.assertNotIn("reference", output)
 
     def test_kernel_backend_counts_and_unrecorded_fields_only_warn(self) -> None:
-        cluster, nodes = self.profile("config/cluster.json")
+        cluster, nodes = self.profile("config/cluster.json", "tp3-triangle")
         r5p = spark.read_json("manifests/benchmarks/2026-10-05-karmic-kraken-r5p.json")["identity"]
         self.assertEqual(
             spark.shape_differences(spark.profile_shape(cluster, nodes), spark.bench_shape(r5p)),
@@ -719,7 +724,7 @@ class ReferenceShapeTest(unittest.TestCase):
         self.assertNotIn("ERROR", output)
 
     def test_doctor_checks_a_named_reference(self) -> None:
-        cluster, nodes = self.profile("config/cluster-tp4.json")
+        cluster, nodes = self.profile("config/cluster.json", "tp4-ring")
         self.assertEqual(spark.benchmark_reference_problems(cluster, nodes), [])
         cluster["benchmark_reference"] = self.TP3_REFERENCE
         self.assertEqual(

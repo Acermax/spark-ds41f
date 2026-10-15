@@ -188,3 +188,42 @@ class SyncRevisionTest(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(spark.command_cluster_sync(args), 0)
         self.assertEqual(calls, ["fetch", "resolve origin/main"])
+
+
+
+class UnqualifiedShapeTest(unittest.TestCase):
+    """A recipe shape starts in production only once a release benchmark qualifies its image."""
+
+    def start(self, cluster: dict, unqualified_shape: bool = False) -> str:
+        args = argparse.Namespace(apply=True, cluster_config="config/cluster.json", shape=None, replace=True,
+                                  remove=False, parallel=False, change_shape=False, verbose=False,
+                                  unqualified_shape=unqualified_shape)
+
+        def no_ssh(*argv, **kwargs):
+            raise AssertionError("contacted a node")
+
+        with mock.patch.object(spark, "configuration", return_value=(cluster, NODES3, {})), \
+                mock.patch.object(spark, "expected_command", return_value=TP3), \
+                mock.patch.object(spark, "live_engine", return_value=None), \
+                mock.patch.object(spark, "run_ssh", side_effect=no_ssh), \
+                mock.patch.object(spark, "require_local_deployment_state",
+                                  side_effect=AssertionError("preflight reached")), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            try:
+                spark.command_cluster_start(args)
+            except (SystemExit, AssertionError) as stop:
+                return str(stop)
+        return "started"
+
+    def test_an_unqualified_shape_is_refused_unless_overridden(self) -> None:
+        tp3 = spark.cluster_recipe.resolve(spark.read_json("config/cluster.json"), "tp3-triangle")
+        self.assertNotIn("benchmark_reference", tp3)
+        self.assertIn("no release benchmark qualifies this recipe's image on tp3-triangle", self.start(tp3))
+        self.assertEqual(self.start(tp3, unqualified_shape=True), "preflight reached")
+        tp4 = spark.cluster_recipe.resolve(spark.read_json("config/cluster.json"), "tp4-ring")
+        self.assertEqual(self.start(tp4), "preflight reached")
+
+    def test_a_concrete_profile_has_no_qualification_check(self) -> None:
+        archived = spark.read_json("experiments/2026-10-14-one-recipe/tp3-r6h-production.json")
+        self.assertNotIn("shape", archived)
+        self.assertEqual(self.start(archived), "preflight reached")
