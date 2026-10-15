@@ -1815,19 +1815,31 @@ def wait_for_api(cluster: dict, nodes: dict) -> None:
     raise RuntimeError(f"API did not become ready within {timeout}s{suffix}")
 
 
+def memguard_settings(cluster: dict, phase: str) -> list[str]:
+    """The guard's container, phase, threshold (GiB), interval and container wait
+    (seconds), from the resolved configuration: an arm overlay or a recipe has no
+    such fields of its own, so the guard never reads the file."""
+    host = cluster["host"]
+    if phase == "startup":
+        values = (host["startup_memguard_gib"], host["startup_memguard_interval_seconds"],
+                  host["startup_memguard_wait_seconds"])
+    elif phase == "steady":
+        values = (host["memguard_gib"], host["memguard_interval_seconds"], 0)
+    else:
+        raise ValueError(f"memguard phase must be startup or steady, not {phase!r}")
+    return [cluster["container"]["name"], phase, *(str(value) for value in values)]
+
+
 def start_memguard(
     cluster: dict,
     nodes: dict,
     node: dict,
-    cluster_config: str,
     phase: str,
     *,
     prelaunch: bool = False,
 ) -> None:
     script = f"{repository_path(cluster)}/scripts/memguard-start.sh"
-    arguments = [script, cluster_config, phase]
-    if prelaunch:
-        arguments.append("prelaunch")
+    arguments = [script, *memguard_settings(cluster, phase), "prelaunch" if prelaunch else "running"]
     result = run_ssh(nodes, node, *arguments)
     if result.returncode:
         detail = result.stderr.strip() or result.stdout.strip()
@@ -1837,14 +1849,9 @@ def start_memguard(
     print(f"{node['name']}: {result.stdout.strip()}", flush=True)
 
 
-def start_memguards(
-    cluster: dict,
-    nodes: dict,
-    cluster_config: str,
-    phase: str,
-) -> None:
+def start_memguards(cluster: dict, nodes: dict, phase: str) -> None:
     for node in nodes["nodes"]:
-        start_memguard(cluster, nodes, node, cluster_config, phase)
+        start_memguard(cluster, nodes, node, phase)
 
 
 def preserve_failed_start_logs(
@@ -1892,7 +1899,6 @@ def restore_containers(
     nodes: dict,
     backups: dict[str, str],
     started: list[dict],
-    cluster_config: str,
 ) -> None:
     name = cluster["container"]["name"]
     for node in nodes["nodes"]:
@@ -1908,14 +1914,7 @@ def restore_containers(
             print(f"WARN: {node['name']}: could not restore container name", file=sys.stderr)
             continue
         try:
-            start_memguard(
-                cluster,
-                nodes,
-                node,
-                cluster_config,
-                "startup",
-                prelaunch=True,
-            )
+            start_memguard(cluster, nodes, node, "startup", prelaunch=True)
         except RuntimeError as error:
             print(
                 f"WARN: {error}; did not start restored container unguarded",
@@ -2127,14 +2126,7 @@ def command_cluster_start(args: argparse.Namespace) -> int:
             if errors:
                 raise RuntimeError("; ".join(errors))
         for node in order:
-            start_memguard(
-                cluster,
-                nodes,
-                node,
-                config_relative,
-                "startup",
-                prelaunch=True,
-            )
+            start_memguard(cluster, nodes, node, "startup", prelaunch=True)
             if not memguard_is_active(cluster, nodes, node):
                 raise RuntimeError(
                     f"{node['name']}: pre-armed startup memguard is not active; "
@@ -2148,7 +2140,7 @@ def command_cluster_start(args: argparse.Namespace) -> int:
             print(f"{node['name']}: launched {result.stdout.strip()} ({elapsed()})", flush=True)
         wait_for_api(cluster, nodes)
         print(f"API ready at {elapsed()}", flush=True)
-        start_memguards(cluster, nodes, config_relative, "steady")
+        start_memguards(cluster, nodes, "steady")
     except (RuntimeError, KeyboardInterrupt) as error:
         detail = str(error) if str(error) else "cluster start interrupted"
         print(f"ERROR: {detail}", file=sys.stderr)
@@ -2162,11 +2154,11 @@ def command_cluster_start(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
         print("rolling back containers started by this command", file=sys.stderr)
-        restore_containers(cluster, nodes, backups, started, config_relative)
+        restore_containers(cluster, nodes, backups, started)
         if backups:
             try:
                 wait_for_api(cluster, nodes)
-                start_memguards(cluster, nodes, config_relative, "steady")
+                start_memguards(cluster, nodes, "steady")
             except RuntimeError as rollback_error:
                 print(f"WARN: rollback health check failed: {rollback_error}", file=sys.stderr)
         return 130 if isinstance(error, KeyboardInterrupt) else 1
