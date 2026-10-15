@@ -111,8 +111,8 @@
       "upstream": "https://github.com/christopherowen/dgx-spark-networking.git",
       "contribution_remote": null,
       "tracking_ref": "refs/heads/timeout-stop",
-      "revision": "22c6caa830149afefeb12130ba38c6f55ed93dcf",
-      "revision_url": "https://github.com/christopherowen/dgx-spark-networking/commit/22c6caa830149afefeb12130ba38c6f55ed93dcf",
+      "revision": "3bc8d10104a5012244a0424d7dfc1107a72eafab",
+      "revision_url": "https://github.com/christopherowen/dgx-spark-networking/commit/3bc8d10104a5012244a0424d7dfc1107a72eafab",
       "version": "0.3.0",
       "role": "sparknet: one-shot RoCE collectives (TileLang kernels only, timed waits that stop the GPU, API 2) and fabric profiles, for the TileLang family's TP collectives; branch timeout-stop on tilelang-only, pending fleet qualification"
     }
