@@ -59,9 +59,10 @@ class RecipeTest(unittest.TestCase):
         self.assertEqual(resolved["serve_args"], old["serve_args"])  # sizing, drafts and capture ladder
         self.assertEqual(resolved["fabric"], old["fabric"])
         for key, value in old["environment"].items():
-            if key.startswith("NCCL_") or key in ("SPARKNET_ROCE_ALLGATHER_MAX_BYTES", "SPARK3_DSPARK_COST_DIR",
-                                                   "SPARK3_DISPLAY_CARVEOUT_WEIGHTS"):
+            if key.startswith("NCCL_") or key in ("SPARKNET_ROCE_ALLGATHER_MAX_BYTES", "SPARK3_DISPLAY_CARVEOUT_WEIGHTS"):
                 self.assertEqual(resolved["environment"].get(key), value, key)
+        # TP3 schedules on its build's own cost curves (bin/spark derives the directory).
+        self.assertNotIn("SPARK3_DSPARK_COST_DIR", resolved["environment"])
         tp4 = recipe.resolve(self.recipe, "tp4-ring")
         self.assertEqual(resolved["container"], tp4["container"])  # one image and run arguments for every shape
         self.assertNotIn("benchmark_reference", resolved)  # r6n is not benched on TP3

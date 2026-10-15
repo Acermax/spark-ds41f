@@ -7,8 +7,11 @@ production serves r6h on TP3 from its archived record
 (`experiments/2026-10-14-one-recipe/tp3-r6h-production.json`) until this release.
 
 Nothing in r6n depends on the TP size. TP3 runs the recipe's `tp3-triangle` shape: r6h's
-TP3 sizing (8 streams, 512K context), NCCL profile and cost curves
-(`tp3-r6h-20261012`, as r6h benched), on r6n's image and settings.
+TP3 sizing (8 streams, 512K context) and NCCL profile, on r6n's image and settings. Its
+DSpark cost curves are r6n's own (no pinned directory since 2026-10-15): the release's
+first r6n boot profiles them and r6n again reuses them, while r6h keeps its pinned
+`tp3-r6h-20261012`. The gate ran before that change, on r6h's curves; the traced and
+cold-cache boots profile curves of their own, which production never uses.
 
 ## Arms
 
