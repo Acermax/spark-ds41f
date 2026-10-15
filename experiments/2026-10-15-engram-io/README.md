@@ -41,3 +41,14 @@ startup call):
   200 ms, which hung 2 of 2 boots before) and `fix.json` (w1-w3).
 
 Speed is judged by the release comparison of the candidate that carries this change.
+
+## Prefill (2026-10-15)
+
+r6m's release has r6k's bits, decode at small row counts 3-4.5% faster, and every
+prefill size 10-13% slower (the 72- and 96-row decode steps 1.5-2.3% slower): about
+0.5 µs per Engram lookup that the forward does not hide. r6l prefilled level with r6k.
+[prefill.json](prefill.json) ([bundles/prefill](bundles/prefill), r6m image, dgx4) times
+the two parts that changed against B12X on the same data: the gather (with and without
+its per-block poll of the control block) against B12X's lookup at 16-8192 tokens, and the
+reader against B12X's row cache on the same random rows of a 1 GiB table
+(`/cache/engram-prefill`, left on dgx4).
