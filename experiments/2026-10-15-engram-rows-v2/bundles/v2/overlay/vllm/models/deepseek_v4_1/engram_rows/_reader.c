@@ -321,6 +321,10 @@ static bool wait_for_ids(reader_t *reader, uint32_t sequence, failure_t *failure
         if (now_ns() - start > 200000) {
             struct timespec pause = {0, 10000};
             nanosleep(&pause, NULL);
+        } else {
+#if defined(__aarch64__)
+            __asm__ volatile("yield");
+#endif
         }
     }
 }

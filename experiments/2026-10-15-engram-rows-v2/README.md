@@ -68,3 +68,43 @@ Only if both pass: an image, the gate, qualify's boots and the release against r
 - The two fail-stop child tests stopped the GPU as designed, but the gather's first
   launch then failed to load its module and the child exited before printing; the
   children now catch the stopped GPU at the launch or the synchronize.
+
+### Run 2 (13:44 UTC)
+
+All 8 tests pass. The gather is within 1.4 us of B12X's lookup at 16-96 tokens and
+faster from 512 tokens. The two tables are faster than B12X's serial reader at 2048 and
+8192 tokens (table 0 at 26.6 against 28.2 ms at 8192), but table 0 came 0.38 ms later
+at 96 tokens (1.67 against 1.29 ms). The bench staged with the GPU idle, so the IDs
+were on the host at once and the time included waking the worker from its idle wait,
+while B12X's reader ran on the calling thread. In serving the runner stages a step
+while the GPU still runs the previous one, so the worker is already waiting when the
+IDs arrive.
+
+### Run 3 (13:47 UTC): GPU idle and busy at staging
+
+All 8 tests pass. Gather (wait included) against B12X's lookup, us warm:
+
+| tokens | all rows local | a quarter local (TP4) |
+|---|---|---|
+| 16 | +1.1 | +1.2 |
+| 96 | +0.8 | +0.7 |
+| 512 | -5.0 | -2.0 |
+| 2048 | -9.6 | -1.9 |
+| 8192 | -56.7 | -19.7 |
+
+Bits equal everywhere; the small-size cost is the wait's launch.
+
+Two tables, v2 minus B12X's serial reader, ms (median of 8 steps, a quarter local):
+
+| tokens | GPU idle at staging: table 0 / table 1 | GPU busy at staging: table 0 / table 1 |
+|---|---|---|
+| 96 | +0.17 / +0.21 | +0.05 / +0.03 |
+| 2048 | +0.08 / +0.04 | -0.17 / -0.50 |
+| 8192 | -0.87 / -1.95 | -1.16 / -2.41 |
+
+The busy kernel's calibration ran short (its times came out below zero), so only the
+differences are meaningful there, and the bench's ratio verdict on them is void. B12X's
+reader here is its best case, a synchronous read on the calling thread; r6k serves it
+through a Python executor thread polling the event every 50 us. No gross regression
+remains, so the release against r6k decides. The reader's spin now also yields the
+core (after run 3).
