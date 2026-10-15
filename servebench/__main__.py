@@ -83,7 +83,8 @@ def command_run(args: argparse.Namespace) -> int:
 def command_engine(args: argparse.Namespace) -> int:
     if args.grid == "default":
         longest = args.max_context or engine.max_model_len(args.url)
-        shapes = engine.default_shapes(drafts=args.drafts, max_context=longest, prefill=args.prefill)
+        shapes = engine.default_shapes(drafts=args.drafts, max_context=longest, prefill=args.prefill,
+                                       max_requests=args.max_requests)
     else:
         with open(args.grid, encoding="utf-8") as handle:
             shapes = json.load(handle)
@@ -95,7 +96,8 @@ def command_engine(args: argparse.Namespace) -> int:
               "server": {"url": args.url, "workers": raw["workers"], "rank": raw["rank"],
                          "prefix_cache_reset": raw["prefix_cache_reset"]},
               "workload": {"grid": args.grid, "replays": args.replays, "warmup": args.warmup,
-                           "settle": raw["settle"], "drafts": args.drafts, "prefill": args.prefill},
+                           "settle": raw["settle"], "drafts": args.drafts, "prefill": args.prefill,
+                           "max_requests": args.max_requests},
               "engine": rows}
     if args.output:
         write_json(args.output, result)
@@ -228,8 +230,12 @@ def command_prefill(args: argparse.Namespace) -> int:
 
 def command_suite(args: argparse.Namespace) -> int:
     definition = suite.load(args.suite)
+    metadata = None
+    if args.metadata:
+        with open(args.metadata, encoding="utf-8") as handle:
+            metadata = json.load(handle)
     index = suite.run(main, args.url, definition, args.out, label=args.label, corpus=args.corpus,
-                      log=lambda message: print(message, file=sys.stderr, flush=True))
+                      metadata=metadata, log=lambda message: print(message, file=sys.stderr, flush=True))
     failed = [step["id"] for step in index["steps"] if step["exit"] != 0]
     print(json.dumps({"summary": "servebench suite", "suite": definition["name"],
                       "suite_sha256": index["suite_sha256"][:12], "label": args.label, "out": args.out,
@@ -280,6 +286,8 @@ def build_parser() -> argparse.ArgumentParser:
                       help="add 8K prefill chunks (dummy prefill does not track real prefill)")
     grid.add_argument("--drafts", type=int, default=5, help="drafts per request in verify rows")
     grid.add_argument("--max-context", type=int, help="longest context (default: the server's)")
+    grid.add_argument("--max-requests", type=int, default=16,
+                      help="leave out shapes of more requests than this (the server's --max-num-seqs)")
     grid.add_argument("--label", help="name for tables")
     grid.add_argument("--output", help="write the result JSON here")
     grid.set_defaults(func=command_engine)
@@ -323,6 +331,8 @@ def build_parser() -> argparse.ArgumentParser:
     fixed.add_argument("--out", required=True, help="directory for every step's result and suite.json")
     fixed.add_argument("--corpus", help="model steps score this model result's text (the first arm's)")
     fixed.add_argument("--label", help="name for tables")
+    fixed.add_argument("--metadata", metavar="JSON",
+                       help="a JSON file recorded in suite.json as given (the deployment's identity)")
     fixed.set_defaults(func=command_suite)
     compare = sub.add_parser("compare", help="judge a candidate run against a base run")
     compare.add_argument("base", help="a result file, or a suite run's directory")

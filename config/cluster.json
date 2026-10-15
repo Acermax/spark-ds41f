@@ -265,7 +265,7 @@
         "SPARK3_DSPARK_COST_DIR": "/cache/kkref/dspark-costs/ring4-r6h-headout-20261012",
         "SPARKNET_ROCE_ALLGATHER_MAX_BYTES": "2097152"
       },
-      "benchmark_reference": "manifests/benchmarks/2026-10-13-karmic-kraken-r6k-tp4.json"
+      "benchmark_reference": "manifests/suites/2026-10-15-karmic-kraken-r6n-tp4"
     },
     "tp3-triangle": {
       "notes": "Three nodes fully cabled (a triangle); NCCL settings are sparknet's tp3-triangle profile. The embedding and head live in the display carve-out, which TP3's KV budget needs (docs/current-state.md).",

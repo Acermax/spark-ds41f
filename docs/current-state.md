@@ -25,10 +25,11 @@ arrive:
   keep a NaN instead of hiding it; ten kernel families have non-finite contract
   tests (r6l).
 
-r6n was released on the servebench release suite
-([run](../manifests/suites/2026-10-15-karmic-kraken-r6n-tp4/)). `tp4-ring`'s
-`benchmark_reference`, the run `bin/spark bench` compares with by default, stays
-r6k's bench run until a bench runs on r6n.
+r6n was released on the servebench release suite. Its run
+([manifests/suites/2026-10-15-karmic-kraken-r6n-tp4](../manifests/suites/2026-10-15-karmic-kraken-r6n-tp4/))
+is `tp4-ring`'s `benchmark_reference`. It ran release version 1, so `bin/spark bench
+--suite release` (version 2, with the Poisson step) compares with it only once the next
+release records a version 2 run.
 
 Since 2026-10-14 the TP4 profile pins serving to the GB10's ten fast cores
 (`--cpuset-cpus=5-9,15-19`; `experiments/2026-10-14-boot-spread`). Serving keeps three or

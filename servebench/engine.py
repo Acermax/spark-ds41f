@@ -22,13 +22,15 @@ from . import prom, stats
 SCHEMA = "servebench-engine/1"
 
 
-def default_shapes(drafts: int = 5, max_context: int | None = None, prefill: bool = False) -> list[dict]:
+def default_shapes(drafts: int = 5, max_context: int | None = None, prefill: bool = False,
+                   max_requests: int = 16) -> list[dict]:
     """Verification rows (requests x (1 + depth)) at 4K context:
     - 1, 4, 8 and 16 requests at depths 1 and 2, what adaptive verification runs under
       load (about two rows a request at 8-16 streams on 2026-10-14);
     - 1, 2, 4, 8, 12 and 16 requests at the full ``drafts``.
     Then depth 2 for 1, 8 and 16 requests at 64K, 1 and 8 at 256K, and 1 at the server's
-    longest context. With ``prefill``, 8K chunks at 0 and 256K context too."""
+    longest context. Shapes of more than ``max_requests`` requests (the server's
+    --max-num-seqs) are left out. With ``prefill``, 8K chunks at 0 and 256K context too."""
     def decode(requests: int, depth: int, context: int) -> dict:
         return {"kind": "decode", "num_reqs": requests, "num_tokens": requests * (1 + depth),
                 "context_len": context}
@@ -38,6 +40,7 @@ def default_shapes(drafts: int = 5, max_context: int | None = None, prefill: boo
     shapes += [decode(r, 2, 262144) for r in (1, 8)]
     if max_context and max_context > 262144:
         shapes.append(decode(1, 2, max_context - 8192))
+    shapes = [shape for shape in shapes if shape["num_reqs"] <= max_requests]
     if prefill:
         shapes += [{"kind": "prefill", "prefill": True, "num_tokens": 8192, "context_len": c} for c in (0, 262144)]
     return shapes

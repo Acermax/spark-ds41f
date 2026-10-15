@@ -145,7 +145,7 @@
   "build_host": "dgx4",
   "copies": "one ID verified on every node (dgx1-dgx4)"
  },
- "benchmark_reference": "manifests/benchmarks/2026-10-13-karmic-kraken-r6k-tp4.json (tp4-ring's last bin/spark bench run; r6n was released on the servebench suite, release_suite)",
+ "benchmark_reference": "manifests/suites/2026-10-15-karmic-kraken-r6n-tp4",
  "previous_baseline": "2026-10-13-karmic-kraken-r6k",
  "hosts": {
   "os": "DGX Spark 26.09.2 (dgx-spark-ota-update-meta)",
@@ -170,6 +170,5 @@
    "swap": "/swap-64k.img"
   }
  },
- "release_suite": "manifests/suites/2026-10-15-karmic-kraken-r6n-tp4/",
  "deployment": "TP4 production since 2026-10-15 20:16 UTC from cba403f (cluster sync --revision, cluster start --apply --replace; API ready in 89 s); doctor --live matches (only the weight-fragmentation warnings); a temperature-0 sanity request answered correctly"
 }
