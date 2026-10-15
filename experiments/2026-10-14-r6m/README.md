@@ -50,7 +50,8 @@ image, the trees, the lock, `SPARK3_ENGRAM_ASYNC` (retired) and `SPARKNET_ROCE_K
    JIT-monitor unit tests from the image ([bundles/engram-tests](bundles/engram-tests),
    dgx4); the collective probe through vLLM's communicator; sparknet's fail-stop
    scenarios (eager, and a graph captured under a 60 s timeout replayed under 2 s)
-   on every rank, each judging its own stop time and report; one boot on an empty
+   on every rank, each judging its own stop time and report (with a 1 MiB dispatch
+   limit: the probe registers 1 MiB, and serving's 2 MiB limit is not under test); one boot on an empty
    TileLang cache (every rank cold), which reproduces the forum report's startup
    skew and lists what compiles inside a collective phase; six traced boots that
    each open with a lone short request (the crash's trigger), collecting every
