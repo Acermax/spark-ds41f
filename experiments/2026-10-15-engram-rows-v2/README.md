@@ -54,3 +54,17 @@ On the r6m image with v2's files overlaid, dgx4:
   by more than 5%.
 
 Only if both pass: an image, the gate, qualify's boots and the release against r6k.
+
+### Run 1 (2026-10-15 13:40 UTC)
+
+- Gather, wait included, against B12X's lookup: +1.0 to +2.3 us at 16-512 tokens
+  (the wait's launch), 10 us faster at 2048 and 36-58 us faster at 8192, bits equal
+  everywhere; with a quarter of the rows local, 540 against 576 us at 8192.
+- Two tables: level with B12X's serial reader at 2048 and 8192 tokens (table 0 at
+  27.3 against 28.3 ms at 8192), but table 0 0.11 ms later at 96 tokens (1.38
+  against 1.27 ms): the worker polled for the row IDs with 20 us sleeps that the
+  default 50 us timer slack stretched. It now spins for 200 us, then sleeps 10 us
+  with a 1 ns slack.
+- The two fail-stop child tests stopped the GPU as designed, but the gather's first
+  launch then failed to load its module and the child exited before printing; the
+  children now catch the stopped GPU at the launch or the synchronize.

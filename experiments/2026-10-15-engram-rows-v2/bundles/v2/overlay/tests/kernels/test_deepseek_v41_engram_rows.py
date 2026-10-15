@@ -183,8 +183,8 @@ def _child_times_out(directory: str) -> None:
     _, _, paths = _write_table(directory, seed=7)
     rows = _rows(paths, delay_s=3.0, rows_timeout_s=0.2)
     ids = torch.zeros((2, HEADS), dtype=torch.int64, device="cuda")
-    out, _ = _step(rows, ids, 2)
-    try:
+    try:  # the stopped GPU fails the next launch or the synchronize
+        _step(rows, ids, 2)
         torch.cuda.synchronize()
     except Exception as error:
         print(f"CUDA ERROR {type(error).__name__}")
@@ -199,8 +199,8 @@ def _child_reader_fails(directory: str) -> None:
         f.truncate(WEIGHT_OFFSET + 100)
     ids = torch.full((2, HEADS), TABLE_ROWS - 1, dtype=torch.int64, device="cuda")
     start = time.monotonic()
-    _step(rows, ids, 2)
-    try:
+    try:  # the stopped GPU fails the next launch or the synchronize
+        _step(rows, ids, 2)
         torch.cuda.synchronize()
     except Exception as error:
         print(f"CUDA ERROR {type(error).__name__}")
