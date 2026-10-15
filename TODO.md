@@ -33,6 +33,27 @@ before tuning anything on this basis.
 
 ## Next release
 
+**r6m** (gating from 2026-10-15, [experiments/2026-10-14-r6m](experiments/2026-10-14-r6m/README.md)):
+the selected items below except the indexer ReLU, plus fail-stop sparknet, host
+rendezvous at startup, the eager draft budget and the native Engram reader. The
+indexer ReLU and the index quantizer's NaN handling are in round 6 of the kernel
+contracts (a BF16 clamp, a precise timer); they join the next candidate if they are
+within 1% of r6k with its bits.
+
+**After r6m ships:**
+1. Drop `disk_resident_scales` from the recipe's serve arguments, then the field
+   (vLLM 0145 accepts it only as false, so the r6k recipe stays valid under
+   `doctor --live`).
+2. Build the Engram reader into the image: it compiles with `cc` on first use into
+   the cache, and no compiler should run when serving starts.
+3. Remove the Qwen model code (owner, 2026-10-15: no Qwen support needed).
+4. One host channel: move the Engram control block's wait and publish helpers and
+   the native worker into sparknet, then put DSpark's confidences on it with
+   sparknet's broadcast.
+5. Engram reader latency: A/B a hot-spinning worker against deep C-states disabled
+   on its core (sparknest measured 231-433 µs for a Spark core to leave a deep
+   idle state).
+
 **Selected** (in the next candidate's series):
 1. **Kernel contracts and three NaN fixes**
    ([experiments/2026-10-14-kernel-contracts](experiments/2026-10-14-kernel-contracts/README.md),
@@ -44,7 +65,8 @@ before tuning anything on this basis.
    - **w1:** all contracts pass with the fixes, and the kernels are bit-identical to
      r6k's on finite inputs.
    - **Before gating:** recover the indexer ReLU's vectorized `max2` (+4% on that
-     kernel at an 8K prefill chunk, about 0.25% of the chunk).
+     kernel at an 8K prefill chunk, about 0.25% of the chunk). Round 4's FP32 clamp
+     is worst +1.0%; round 6 tries the clamp on the BF16 dot.
    - **Open, the owner's decision:** TileKernels' routed-expert SwiGLU has the same
      clamp. It needs a TileKernels patch or an upstream change; its contract is a
      strict `xfail` until then.
