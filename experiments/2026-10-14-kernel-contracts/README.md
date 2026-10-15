@@ -183,3 +183,76 @@ r6k's bits on finite inputs. Worst median time ratio against r6k (warm / cold):
 - `r6k_precise`: r6k's `max` with fast math off. A control, expected to fail the NaN
   contract: it shows what fast math off does to r6k's bits and time by itself.
 - `bits16`: the NaN test on BF16 bits.
+
+### Round 3 results (13:15-13:17 UTC)
+
+- `ne_precise` keeps r6k's bits and time (worst 1.000 / 1.003) but fails the NaN contract
+  (no NaN where the reference has 3980).
+- `r6k_precise`: fast math off leaves r6k's bits unchanged.
+- `bits16` passes at 1.022 / 1.048, with eight serial-loop warnings.
+
+Fast math was never the cause: `tl.enable_fast_math` is off by default, and the indexer
+never sets it (only sparse MLA does). TileLang or TVM removes the `dot != dot` test before
+nvcc sees it.
+
+### Round 4, queued ([relu4.json](relu4.json))
+
+A survey of the other indexers (2026-10-15) found that most drop a NaN at the ReLU, while
+every PyTorch reference keeps it:
+
+| indexer | ReLU | NaN |
+| --- | --- | --- |
+| r6k, and our TileLang example `examples/deepseek_v41/indexer_sm120.py` | `T.max(x, 0.0)` (`fmaxf`) | dropped |
+| TileLang examples: V3.2 lightning indexer, DeepSeek's V3.2 inference kernel, DSA fine-tune forward and backward, GLM-5.3 kpool | `T.max(x, 0)` | dropped |
+| DeepGEMM SM90, dense and paged | `fmaxf(acc, 0)` | dropped |
+| B12X | `fmax(acc, 0)` | dropped |
+| DeepGEMM SM100 | `cvt.rn.relu.bf16x2.f32` | kept, behind an `__CUDA_ARCH__ >= 1000` gate; below it `fmaxf` drops it |
+| vLLM CPU | `std::max(dot, 0.0f)` | kept (argument order) |
+| PyTorch references, including those examples' own tests | `relu()`, `F.relu`, `clamp_min(0)` | kept |
+
+TileLang's NaN support is limited by data type, not by architecture:
+`reduce_max/min/absmax(nan_propagate=True)` accept FP16/BF16 only, and the internal
+`tl.max_nan` lowers FP32 to `fmaxf`. `T.clamp` is documented as NaN-propagating, matching
+`torch.clamp` (upstream #3205, in r6k's TileLang), and is pure and TVectorizable;
+`tirx.isnan` is pure but not TVectorizable, which is why round 1's `isnan` form serialized
+the loop.
+
+[bundles/relu4](bundles/relu4), all from TileLang's existing language surface:
+- indexer `clamp`: `T.clamp(dot, 0, inf)`, the TileLang spelling of the reference's
+  `relu_` (`torch.clamp(min=0)`);
+- indexer `lt`: `dot < 0 ? 0 : dot`, no self-comparison; `NaN < 0` is false;
+- both timed and bit-checked against r6k at the seven shapes, and run through the indexer
+  tests and NaN contract;
+- printed for r6k, round 1's `ne`, `clamp` and `lt`: the parsed TIR's ReLU lines and the
+  generated CUDA at 16 x 64K, plus TVM's analyzer on `x != x`, to find what removes the
+  test before an upstream report;
+- a report-only probe of the index quantizer (queries and keys share it) on a NaN and an
+  infinity, beside TileKernels' torch reference cast. Reading the source predicts that
+  r6k encodes a NaN as a zero code under a finite scale (the group amax uses `fmaxf`, the
+  E2M1 code is a chain of `|x| > threshold` tests), and that an infinity gives its group
+  the UE8M0 scale 0xFF. TileKernels' max keeps the NaN, but its UE8M0 round-up maps a NaN
+  scale to byte 0x00. What the quantizer should do with a NaN is the owner's decision.
+
+Adoption rule as before: contract passes, r6k's bits, every shape within 1% of r6k.
+
+### Round 5, queued ([relu5.json](relu5.json)): the index quantizer keeps a NaN
+
+Owner, 2026-10-15: "we should handle the NaNs but without performance penalty". The index
+quantizer (queries and keys) gets the NaN treatment an infinity already has:
+- the group amax is an integer max on `|x|`'s FP32 bits; for non-negative values integer
+  order is float order with NaN above infinity, so the max keeps the NaN, and a finite
+  group gets fmaxf's value (same bytes);
+- the UE8M0 exponent is clamped at 255, so a NaN amax takes the NaN scale 0xFF (it would
+  round up to 256 and wrap to 0x00);
+- a non-finite group's codes are zeros, so its block's partial dot is zero and the 0xFF
+  scale makes the dot NaN however the MMA reads 0xFF (one select per group).
+
+[bundles/relu5](bundles/relu5):
+- bytes against r6k's quantizer on finite inputs (random, ties, zeros, signed zeros,
+  BF16 extremes, subnormals), contiguous (queries) and paged (keys); time at query and key
+  sizes, judged at 1%;
+- with the `clamp` ReLU: the indexer tests, the NaN contract, and new NaN-input contracts
+  (`test_deepseek_v41_tilelang_nan_inputs.py`): a non-finite group's bytes, a NaN key
+  reaches exactly the positions that read its slot, a NaN query exactly its row, and
+  everything else keeps its bits;
+- report only: how the MMA reads a query group's scale 0xFF with nonzero and zero codes.
