@@ -34,6 +34,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -298,10 +299,11 @@ static failure_t read_rows(reader_t *reader, uint32_t count) {
 
 /* --- worker ------------------------------------------------------------------ */
 
-/* Wait for the GPU to write the step's row IDs: spin briefly, then poll every 20 us. */
+/* Wait for the GPU to write the step's row IDs: spin for 200 us (the IDs of a step the
+ * GPU is already on arrive within it), then poll every 10 us. */
 static bool wait_for_ids(reader_t *reader, uint32_t sequence, failure_t *failure) {
     uint64_t start = now_ns();
-    for (unsigned polls = 0;; polls++) {
+    for (;;) {
         if (reached(__atomic_load_n(&reader->control[CTRL_IDS_SEQ], __ATOMIC_ACQUIRE), sequence))
             return true;
         if (__atomic_load_n(&reader->closing, __ATOMIC_RELAXED)) {
@@ -316,8 +318,8 @@ static bool wait_for_ids(reader_t *reader, uint32_t sequence, failure_t *failure
                      sequence, (double)reader->ids_timeout_ns * 1e-9);
             return false;
         }
-        if (polls >= 1024) {
-            struct timespec pause = {0, 20000};
+        if (now_ns() - start > 200000) {
+            struct timespec pause = {0, 10000};
             nanosleep(&pause, NULL);
         }
     }
@@ -386,6 +388,8 @@ static void queue_init(void) {
 
 static void *worker_main(void *arg) {
     (void)arg;
+    /* Sleep as asked: the default 50 us timer slack would stretch every 10 us poll. */
+    prctl(PR_SET_TIMERSLACK, 1UL, 0, 0, 0);
     pthread_mutex_lock(&queue.mutex);
     for (;;) {
         while (queue.head == queue.tail) pthread_cond_wait(&queue.wake, &queue.mutex);
