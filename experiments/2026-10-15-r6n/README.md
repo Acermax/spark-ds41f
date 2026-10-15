@@ -43,6 +43,24 @@ Source: vLLM tree `0c60314d` (patch head `b1309b4a`, as the build replays it), s
 
 TP3 follows once these pass: see experiments/2026-10-14-one-recipe ("Releasing TP3").
 
+## Qualify (2026-10-15)
+
+- Gate: temperature-0 output identical in every scenario and byte-identical to r6k's;
+  16 distinct streams 227.4 tok/s (±0.24%), 8 streams 176.6 (±0.27%).
+- Collective probe and both fail-stop scenarios pass on all four ranks.
+- Two boots with every Engram read delayed 200 ms: neither hung (a 64-token request in
+  9.0 s: each step now waits for the two tables in turn).
+- Six traced boots that open with a lone short request, then Poisson load: 10 of 10
+  requests served on each, none failed.
+- Empty TileLang cache on every rank: ready in 419 s.
+- The Engram unit tests: the reader and gather tests passed, but the first Engram model
+  test then spun for 37 minutes in a host-to-device copy while loading its checkpoint
+  (GPU idle, no Engram reader yet) and was killed. A diagnostic
+  ([engram-debug.json](engram-debug.json), dgx3 and dgx4) did not reproduce it: the model
+  tests alone and right after the GPU-stopping tests all passed. The bundle now bounds
+  every step, dumps every thread's stack after 240 s, and runs the tests that stop the
+  GPU last; it reruns the whole sequence after the release.
+
 ## Credits
 
 huxiaofengtiger reported r6h's TP3 startup failures on the NVIDIA Developer Forums
