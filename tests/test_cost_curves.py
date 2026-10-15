@@ -1,0 +1,74 @@
+"""DSpark cost curves per build: a profile without a pinned directory gets its build's."""
+
+import copy
+import importlib.machinery
+import importlib.util
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parents[1]
+loader = importlib.machinery.SourceFileLoader("spark", str(ROOT / "bin" / "spark"))
+spec = importlib.util.spec_from_loader("spark", loader)
+spark = importlib.util.module_from_spec(spec)
+loader.exec_module(spark)
+
+EXAMPLE_NODES = {"3": "config/nodes.example.json", "4": "config/examples/nodes-ring4.json"}
+
+
+def head(cluster: dict) -> dict:
+    nodes = spark.read_json(EXAMPLE_NODES[spark.serve_arg(cluster, "--tensor-parallel-size")])
+    return next(node for node in nodes["nodes"] if node.get("head"))
+
+
+class CostCurveDirectoryTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tp3 = spark.read_cluster("config/cluster.json", "tp3-triangle")
+        self.tp4 = spark.read_cluster("config/cluster.json", "tp4-ring")
+
+    def directory(self, cluster: dict) -> str:
+        return spark.expected_environment(cluster, head(cluster))["SPARK3_DSPARK_COST_DIR"]
+
+    def test_tp3_derives_its_build_directory_and_tp4_keeps_its_pin(self) -> None:
+        derived = self.directory(self.tp3)
+        self.assertRegex(derived, r"^/cache/kkref/dspark-costs/build-[0-9a-f]{16}$")
+        self.assertEqual(derived, f"{spark.DSPARK_COST_ROOT}/build-{spark.build_fingerprint(self.tp3)}")
+        # TP4 runs the curves its release ran (r6h's), until its next release.
+        self.assertEqual(self.directory(self.tp4), self.tp4["environment"]["SPARK3_DSPARK_COST_DIR"])
+
+    def test_same_build_same_curves(self) -> None:
+        # A setting that is not code (the dev-mode RPC) shares the build's curves.
+        dev = copy.deepcopy(self.tp3)
+        dev["environment"]["VLLM_SERVER_DEV_MODE"] = "1"
+        self.assertEqual(self.directory(dev), self.directory(self.tp3))
+        # The TP3 release's dev-mode arm and the recipe are the same build.
+        arm = spark.read_cluster("experiments/2026-10-15-r6n-tp3/r6n-tp3-dev.json")
+        self.assertEqual(self.directory(arm), self.directory(self.tp3))
+        # A traced arm times differently: its curves never become the build's.
+        traced = spark.read_cluster("experiments/2026-10-15-r6n-tp3/r6n-tp3-traced.json")
+        self.assertNotEqual(self.directory(traced), self.directory(self.tp3))
+
+    def test_another_build_gets_its_own(self) -> None:
+        other = copy.deepcopy(self.tp3)
+        other["container"]["expected_labels"]["local.spark3.vllm.tree"] = "0" * 40
+        self.assertNotEqual(self.directory(other), self.directory(self.tp3))
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+            overlay = Path(tmp) / "kernel.py"
+            overlay.write_text("one")
+            mounted = copy.deepcopy(self.tp3)
+            source = "{home}/projects/spark-ds41f/" + str(overlay.relative_to(ROOT))
+            mounted["container"]["mounts"].append([source, "/opt/spark3/candidate/vllm/kernel.py", "ro"])
+            first = self.directory(mounted)
+            self.assertNotEqual(first, self.directory(self.tp3))
+            overlay.write_text("two")  # the same path with other code
+            self.assertNotEqual(self.directory(mounted), first)
+
+    def test_a_pinned_directory_wins(self) -> None:
+        r6h = spark.read_cluster("experiments/2026-10-14-one-recipe/tp3-r6h-production.json")
+        self.assertEqual(self.directory(r6h), "/cache/kkref/dspark-costs/tp3-r6h-20261012")
+
+
+if __name__ == "__main__":
+    unittest.main()

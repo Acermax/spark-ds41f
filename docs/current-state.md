@@ -36,6 +36,13 @@ Since 2026-10-14 the TP4 profile pins serving to the GB10's ten fast cores
 four threads busy per node, so the slow cores are never needed. `doctor --live` checks the
 pin on every node.
 
+DSpark's verifier schedules on cost curves timed on a boot. A profile without a pinned
+directory gets its build's own (`bin/spark` derives `SPARK3_DSPARK_COST_DIR` from the
+image's source trees, code overlays, environment and serve arguments, all but the
+dev-mode RPC switch): a new build profiles itself on its first boot and reuses its curves
+after. `tp3-triangle` does so since 2026-10-15; `tp4-ring` still pins r6h's until its
+next release.
+
 TP4 keeps the embedding and head in regular memory
 (`SPARK3_DISPLAY_CARVEOUT_WEIGHTS=0`, `experiments/2026-10-12-r6h-loss`) and runs
 on r6h's cost curves for that placement (`ring4-r6h-headout-20261012`), as the r6k

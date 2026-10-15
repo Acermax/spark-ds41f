@@ -52,14 +52,11 @@ next re-cable.
    sparknet's broadcast.
 5. Credit huxiaofengtiger with a `Reported-by:` trailer on vLLM 0143 at the next
    image rebuild (r6n's README credits the forum report already).
-6. **DSpark cost curves per build, not per recipe directory.** The verifier's cost curves
-   (step time by row count, timed at boot) are saved under a key of TP size, draft
-   count, request and token limits and step shapes, but not the build, and the recipe
-   names release-specific directories (`tp3-r6h-20261012`, `ring4-r6h-headout-20261012`).
-   So r6k and r6n still schedule verification with r6h's curves. Add the image's kernel
-   identity (its tree labels) to the key and keep one cache directory: a new build
-   profiles itself on its first boot and reuses its curves after. Do it before the TP3
-   release, whose curves are the stalest.
+6. **Unpin TP4's cost curves at its next release.** Since 2026-10-15 a profile without a
+   pinned directory schedules on its own build's curves (`bin/spark` derives
+   `SPARK3_DSPARK_COST_DIR` per build). `tp4-ring` still pins r6h's
+   (`ring4-r6h-headout-20261012`), as r6n's TP4 release ran; drop the pin with the next
+   TP4 release so its candidate profiles its own.
 7. **Retire the old bench's measurements.** servebench suites decide releases and are the
    benchmark reference (2026-10-15). Remove `bin/spark bench`'s own suites (single-prompt
    decode points that move with the text, burst distinct streams, the quality gate's

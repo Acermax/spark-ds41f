@@ -305,7 +305,6 @@
         "NCCL_SHM_DISABLE": "1",
         "NCCL_SOCKET_IFNAME": "enP7s7",
         "SPARK3_DISPLAY_CARVEOUT_WEIGHTS": "1",
-        "SPARK3_DSPARK_COST_DIR": "/cache/kkref/dspark-costs/tp3-r6h-20261012",
         "SPARKNET_ROCE_ALLGATHER_MAX_BYTES": "4194304"
       }
     },
