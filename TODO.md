@@ -83,6 +83,20 @@ settings. Bound each from a measurement before building it:
 6. **Reader latency.** A/B a hot-spinning worker against deep C-states disabled on its
    core (sparknest measured 231-433 µs for a Spark core to leave a deep idle state).
 
+**Mixed traffic at long context** (from voktolom's knapcio v2.4 report, docs/inspiration.md 2026-10-15):
+1. **Short requests behind a long cold prefill.** `--long-prefill-token-threshold` is 8,096
+   of an 8,192-token budget, so a new request with a few hundred uncached tokens (an agent
+   turn behind a cached prefix) waits for a whole long cold prefill. The mixed-traffic
+   test's long prompts are about 4,000 tokens, one chunk, so it cannot see this. Measure a
+   short request's first token during 72K and 256K cold prefills; then reserve room for it
+   (vLLM's partial-prefill settings or a lower threshold) and confirm temperature-0
+   determinism still holds.
+2. **Idle streams during long cold prefills.** A 1M cold prefill takes about 4 minutes and
+   the stream sends nothing before its first token. Check whether our clients or gateway
+   cut idle streams; if so, send SSE keep-alives.
+3. **Head-node memory at 1M.** Record dgx1's lowest MemAvailable during the release's 1M
+   cold prefill against the memory guard's 3 GiB.
+
 **Selected** (in the next candidate's series):
 1. **Kernel contracts and three NaN fixes**
    ([experiments/2026-10-14-kernel-contracts](experiments/2026-10-14-kernel-contracts/README.md),
