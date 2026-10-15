@@ -53,6 +53,14 @@ quantizer 1-3% slower); they join a candidate only within 1% of r6k with its bit
    sparknet's broadcast.
 5. Credit huxiaofengtiger with a `Reported-by:` trailer on vLLM 0143 at the next
    image rebuild (r6n's README credits the forum report already).
+6. **DSpark cost curves per build, not per recipe directory.** The verifier's cost curves
+   (step time by row count, timed at boot) are saved under a key of TP size, draft
+   count, request and token limits and step shapes, but not the build, and the recipe
+   names release-specific directories (`tp3-r6h-20261012`, `ring4-r6h-headout-20261012`).
+   So r6k and r6n still schedule verification with r6h's curves. Add the image's kernel
+   identity (its tree labels) to the key and keep one cache directory: a new build
+   profiles itself on its first boot and reuses its curves after. Do it before the TP3
+   release, whose curves are the stalest.
 
 **Engram after r6n** (from the 2026-10-15 step back,
 [experiments/2026-10-15-engram-rows-v2](experiments/2026-10-15-engram-rows-v2/README.md)).
