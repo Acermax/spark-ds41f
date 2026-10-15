@@ -33,26 +33,55 @@ before tuning anything on this basis.
 
 ## Next release
 
-**r6m** (gating from 2026-10-15, [experiments/2026-10-14-r6m](experiments/2026-10-14-r6m/README.md)):
-the selected items below except the indexer ReLU, plus fail-stop sparknet, host
-rendezvous at startup, the eager draft budget and the native Engram reader. The
-indexer ReLU and the index quantizer's NaN handling are in round 6 of the kernel
-contracts (a BF16 clamp, a precise timer); they join the next candidate if they are
-within 1% of r6k with its bits.
+**r6n** (gating from 2026-10-15, [experiments/2026-10-15-r6n](experiments/2026-10-15-r6n/README.md)):
+r6m (not promoted: prefill 10-13% slower than r6k) with Engram rows v2 and sparknet
+3bc8d10. It carries the selected items below except the indexer ReLU, plus fail-stop
+sparknet, host rendezvous at startup, the eager draft budget and the native Engram
+reader. The indexer ReLU and the index quantizer's NaN handling stay in the kernel
+contracts' rounds (round 6: the BF16 clamp is on the 1% line at 8K x 2048, the
+quantizer 1-3% slower); they join a candidate only within 1% of r6k with its bits.
 
-**After r6m ships:**
+**After r6n ships:**
 1. Drop `disk_resident_scales` from the recipe's serve arguments, then the field
    (vLLM 0145 accepts it only as false, so the r6k recipe stays valid under
    `doctor --live`).
 2. Build the Engram reader into the image: it compiles with `cc` on first use into
-   the cache, and no compiler should run when serving starts.
+   the cache (persistent on `/cache`), and no compiler should run when serving starts.
 3. Remove the Qwen model code (owner, 2026-10-15: no Qwen support needed).
 4. One host channel: move the Engram control block's wait and publish helpers and
    the native worker into sparknet, then put DSpark's confidences on it with
    sparknet's broadcast.
-5. Engram reader latency: A/B a hot-spinning worker against deep C-states disabled
-   on its core (sparknest measured 231-433 µs for a Spark core to leave a deep
-   idle state).
+5. Credit huxiaofengtiger with a `Reported-by:` trailer on vLLM 0143 at the next
+   image rebuild (r6n's README credits the forum report already).
+
+**Engram after r6n** (from the 2026-10-15 step back,
+[experiments/2026-10-15-engram-rows-v2](experiments/2026-10-15-engram-rows-v2/README.md)).
+Decode and prefill differ in when the row IDs exist and in what bounds the cost, not in
+the code they need, so these are behaviours of the one path, chosen by the step, not
+settings. Bound each from a measurement before building it:
+1. **Measure first.** A debug-only counter (off and free in production) of how long
+   the GPU waits for each table's rows, per step, split into prefill chunks and decode
+   steps, on real text and on the production agent workload. The 2026-10-07
+   measurement put decode's stall at 0.7-1% of a step; prefill's is unmeasured.
+2. **Prefill read-ahead.** A prompt's tokens are known before its chunks run: hash the
+   next chunk's rows on the host and read them while the current chunk computes, so
+   the first Engram layer never waits (antirez's ds4 pipelines its prefill reads this
+   way). Decode cannot: under asynchronous scheduling its row IDs exist only on the
+   GPU when the step starts. Build it if (1) shows prefill's first-table wait matters.
+3. **Decode hot rows.** Decode is latency-bound and keeps hitting common n-grams,
+   while O_DIRECT reads every row from the SSD every step. Compare the page cache
+   (buffered reads, as ds4 does) or a small hot-row cache against today's reads, by
+   hit rate on recorded row IDs, before building one. Ceiling about 1% of a decode step.
+4. **One read per lookup.** Rows and scales live in two files, so a lookup costs two
+   random 4 KiB reads. A one-time, byte-identical repack of each rank's shard into
+   264-byte rows (256 E4M3 values and their 8 scales, as ds4 stores them) halves the
+   reads, for about 50 GB of SSD per node at TP4.
+5. **Sequence-parallel prefill.** Every rank still looks up, all-reduces and projects
+   all of a chunk's Engram rows: a 96 MiB all-reduce and a 400 MiB all-gather per
+   Engram layer at 8K tokens. A rank owns only its heads' rows, so its band could be
+   gathered instead of summed, and the projection split by tokens.
+6. **Reader latency.** A/B a hot-spinning worker against deep C-states disabled on its
+   core (sparknest measured 231-433 µs for a Spark core to leave a deep idle state).
 
 **Selected** (in the next candidate's series):
 1. **Kernel contracts and three NaN fixes**
