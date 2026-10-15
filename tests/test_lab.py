@@ -1116,12 +1116,15 @@ class OverlayArmTest(unittest.TestCase):
     """The lab reads every arm resolved: an overlay arm has no container or serve_args of its own."""
 
     def test_the_lab_reads_overlay_arms_resolved(self) -> None:
-        arm = lab.spark.read_cluster("experiments/2026-10-14-r6m/r6m-dev.json")
-        self.assertEqual(arm["container"]["image"], "vllm-ds41f-kkref:19f2c20ed4d6-r6m")
-        self.assertTrue(arm["container"]["mounts"])
-        profiled = {"extends": {"config": "experiments/2026-10-14-r6m/r6m-dev.json"},
-                    "set": {"serve_args": [*arm["serve_args"], "--profiler-config",
-                                           json.dumps({"torch_profiler_dir": "/cache/profile"})]}}
+        files = {"arm.json": {"extends": {"config": "config/cluster.json", "shape": "tp4-ring"},
+                              "set": {"container": {"image": "vllm-ds41f-kkref:overlay"}}}}
         read = lab.spark.read_json
-        with mock.patch.object(lab.spark, "read_json", lambda path: profiled if path == "arm.json" else read(path)):
-            self.assertEqual(lab.profiler_dir("arm.json"), "/cache/profile")
+        with mock.patch.object(lab.spark, "read_json", lambda path: files[path] if path in files else read(path)):
+            arm = lab.spark.read_cluster("arm.json")
+            self.assertEqual(arm["container"]["image"], "vllm-ds41f-kkref:overlay")
+            self.assertTrue(arm["container"]["mounts"])
+            files["profiled.json"] = {
+                "extends": {"config": "arm.json"},
+                "set": {"serve_args": [*arm["serve_args"], "--profiler-config",
+                                       json.dumps({"torch_profiler_dir": "/cache/profile"})]}}
+            self.assertEqual(lab.profiler_dir("profiled.json"), "/cache/profile")
