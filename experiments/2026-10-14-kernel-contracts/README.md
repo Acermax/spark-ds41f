@@ -256,3 +256,30 @@ quantizer (queries and keys) gets the NaN treatment an infinity already has:
   reaches exactly the positions that read its slot, a NaN query exactly its row, and
   everything else keeps its bits;
 - report only: how the MMA reads a query group's scale 0xFF with nonzero and zero codes.
+
+Results (dgx4, r6k image):
+- round 4: both ReLUs keep the NaN with r6k's bits and pass the indexer tests and NaN
+  contract. `clamp` is worst 1.010 (8K x 2048), `lt` 1.019; neither is within 1%.
+  FP32 `tl::clamp` is three NaN tests, `fmaxf` and `fminf` per element.
+- round 5: the quantizer has r6k's bytes and passes the NaN-input contracts. Its time
+  ratios ran from 0.89 to 1.08, which is timer noise on a kernel of a few microseconds
+  timed three calls to a replay, not a verdict.
+
+### Round 6 ([relu6.json](relu6.json)): no penalty
+
+The score rounds the dot to BF16 before its ReLU, so the ReLU can run on the BF16 value:
+`T.clamp` lowers a BF16 pair to `tl::clamp2`, a packed NaN-keeping max and min
+(`__hmax2_nan`, `__hmin2_nan`), two instructions for two elements, as r6k's two
+`fmaxf`. The scores keep r6k's bits: a ReLU of the rounded value is exact in BF16, and a
+zero's sign cannot reach a score (the head sum starts at +0).
+
+[bundles/relu6](bundles/relu6):
+- `clamp16` (the BF16 clamp with the NaN-keeping quantizer) and round 4's `clamp`,
+  against r6k at the seven shapes; the NaN-keeping quantizer at query and key sizes;
+- a precise timer: a warm replay holds enough calls to last 1.5 ms, cold is one evicted
+  call, each the median over many replays; five rounds alternate which kernel runs
+  first; every table has an r6k-against-r6k row, the noise floor;
+- clamp16's generated CUDA ReLU lines, to show the packed form;
+- clamp16's indexer, quantizer and NaN-input tests.
+
+Adoption rule as before: the contracts pass, r6k's bits, and every shape within 1%.
