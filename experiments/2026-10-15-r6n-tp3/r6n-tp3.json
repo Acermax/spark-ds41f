@@ -1,0 +1,8 @@
+{
+ "notes": "r6n on the three-node triangle: the recipe's tp3-triangle shape (r6h's TP3 sizing, NCCL profile and cost curves) on r6n's image and settings.",
+ "extends": {
+  "config": "config/cluster.json",
+  "shape": "tp3-triangle"
+ },
+ "set": {}
+}
