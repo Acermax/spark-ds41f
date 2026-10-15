@@ -1,25 +1,34 @@
 # Current state
 
 Production is the recipe's `tp4-ring` shape ([config/cluster.json](../config/cluster.json))
-on the four-node ring, promoted 2026-10-14 as
-[`2026-10-13-karmic-kraken-r6k`](../manifests/baselines/2026-10-13-karmic-kraken-r6k.json)
-([promotion record](../experiments/2026-10-13-r6k/README.md)): image
-`vllm-ds41f-kkref:19f2c20ed4d6-r6k` (`sha256:cf2bb9a6`) on all four ranks, Local
-Inference Lab vLLM `19f2c20e` with r6h's series plus vLLM 0118-0133 (patch head
-`aa31eb85`, tree `69108474`), B12X `236ddff0`, sparknet 0.3.0 (`b61660f`). r6k
-keeps r6h's arithmetic and batch-invariant temperature-0 outputs, and removes
-the last known deviation from DeepSeek's reference precision:
-- **WO in TileLang at the reference's precision.** WO-A is a W8A16 GEMM on BF16
-  activations, as the reference's einsum (B12X quantized them to FP8). Its last
-  kernel applies the reference's per-token cast, so WO-B, the reference's MXFP8
-  linear, reads E4M3 straight from it. Sequence-parallel steps project through
-  the rank-order exchange.
-- **The drafter's context-KV projection in TileLang**, with the reference's
-  activation cast.
-- **One sparse-MLA fold on every route** (split, decode, extend), so a prompt
-  prefilled among others rounds as it does alone.
-- **sparknet's TileLang one-shot collectives** (bit-identical to its CuTe
-  kernels, proxy on a big core) **and the TileLang L2 prefetch.**
+on the four-node ring, promoted 2026-10-15 as
+[`2026-10-15-karmic-kraken-r6n`](../manifests/baselines/2026-10-15-karmic-kraken-r6n.json)
+([promotion record](../experiments/2026-10-15-r6n/README.md)): image
+`vllm-ds41f-kkref:19f2c20ed4d6-r6n` (`sha256:5ec81bee`) on all four ranks, Local
+Inference Lab vLLM `19f2c20e` with r6k's series plus vLLM 0134-0145 (patch head
+`b1309b4a`, tree `0c60314d`), TileKernels with the routed SwiGLU NaN patch (tree
+`cb2fa41c`), sparknet `timeout-stop` (`3bc8d10`). r6n keeps r6k's arithmetic and its
+temperature-0 text exactly, and changes how the engine fails and how Engram rows
+arrive:
+- **Engram rows v2.** One native worker (no Python, no GIL) reads both tables in
+  layer order; in the forward a one-thread TileLang kernel waits for each table's
+  step, bounded by `SPARK3_ENGRAM_ROWS_TIMEOUT_MS` (10 s) and stopped at once by a
+  failed read, and the TileLang gather loads only this rank's rows. Decode steps are
+  2.2% shorter than r6k's; prefill is level.
+- **Collectives that stop.** sparknet's waits time out by the GPU clock
+  (`SPARKNET_ROCE_TIMEOUT_MS`, 10 s) and trap naming the peer and lane; the RoCE
+  policy has no fallback to other backends (vLLM 0142).
+- **Startup and the decode path.** Ranks meet on the CPU group before profiling and
+  after the JIT warm-up (0143); the draft budget runs eagerly, so nothing compiles on
+  the first decode step (0144), which removed the first-request crash's trigger.
+- **NaN contracts.** The shared and routed SwiGLU clamps and the Engram gate floor
+  keep a NaN instead of hiding it; ten kernel families have non-finite contract
+  tests (r6l).
+
+r6n was released on the servebench release suite
+([run](../manifests/suites/2026-10-15-karmic-kraken-r6n-tp4/)). `tp4-ring`'s
+`benchmark_reference`, the run `bin/spark bench` compares with by default, stays
+r6k's bench run until a bench runs on r6n.
 
 Since 2026-10-14 the TP4 profile pins serving to the GB10's ten fast cores
 (`--cpuset-cpus=5-9,15-19`; `experiments/2026-10-14-boot-spread`). Serving keeps three or
@@ -28,18 +37,17 @@ pin on every node.
 
 TP4 keeps the embedding and head in regular memory
 (`SPARK3_DISPLAY_CARVEOUT_WEIGHTS=0`, `experiments/2026-10-12-r6h-loss`) and runs
-on r6h's cost curves for that placement (`ring4-r6h-headout-20261012`), as its
-release comparison did. The temperature-0 references are new (70b3379cc289 /
-708ec5b17482), because the text follows the reference's arithmetic.
+on r6h's cost curves for that placement (`ring4-r6h-headout-20261012`), as the r6k
+and r6n release comparisons did. The temperature-0 references are r6k's
+(70b3379cc289 / 708ec5b17482).
 
 The three-node shapes (`tp3-triangle`, `tp3-triangle-4k`) resolve to the
-recipe's r6k image but are not qualified on it until a TP3 release benchmark;
+recipe's r6n image but are not qualified on it until a TP3 release benchmark;
 until then a re-cabled triangle restores r6h from its archived record
 (`experiments/2026-10-14-one-recipe/tp3-r6h-production.json`), which stays on r6h
 ([`2026-10-12-karmic-kraken-r6h`](../manifests/baselines/2026-10-12-karmic-kraken-r6h.json),
-image `sha256:0aaa5d8b`, cost curves `tp3-r6h-20261012`). They are pinned to
-r6h's lock (`experiments/2026-10-12-r6h/upstreams.lock.json`) until they boot
-and bench r6k at the next re-cable. The TileLang kernel family runs the model;
+image `sha256:0aaa5d8b`, cost curves `tp3-r6h-20261012`). The archived record is pinned
+to r6h's frozen lock (`experiments/2026-10-13-r6k/r6h/upstreams.lock.json`). The TileLang kernel family runs the model;
 B12X is the alternative backend in the same image.
 
 | Setting | Active value |

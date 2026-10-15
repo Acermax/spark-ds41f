@@ -1,0 +1,113 @@
+{
+ "schema": "servebench-suite/1",
+ "suite": {
+  "name": "release",
+  "version": 1,
+  "description": "Release measurement, about 45 minutes a build: the screen with all 256 prompts, eight streams as well, and real-text prefill from 32K to 1M.",
+  "steps": [
+   {
+    "id": "model",
+    "command": "model",
+    "args": {
+     "concurrency": 16,
+     "max_tokens": 256,
+     "top": 20
+    }
+   },
+   {
+    "id": "grid",
+    "command": "engine",
+    "args": {
+     "replays": 100,
+     "settle": 1
+    }
+   },
+   {
+    "id": "c16",
+    "command": "run",
+    "args": {
+     "mode": "closed",
+     "concurrency": 16,
+     "warmup": 60,
+     "duration": 300,
+     "extra_body": {
+      "chat_template_kwargs": {
+       "thinking": false
+      }
+     }
+    }
+   },
+   {
+    "id": "c8",
+    "command": "run",
+    "args": {
+     "mode": "closed",
+     "concurrency": 8,
+     "warmup": 60,
+     "duration": 300,
+     "extra_body": {
+      "chat_template_kwargs": {
+       "thinking": false
+      }
+     }
+    }
+   },
+   {
+    "id": "prefill",
+    "command": "prefill",
+    "args": {
+     "sizes": [
+      32768,
+      131072,
+      262144,
+      524288,
+      1000000
+     ],
+     "repeats": 3
+    }
+   }
+  ]
+ },
+ "suite_sha256": "03c8c8049bca5bd7035cf2642555302391af5a8baa2fa1f1c8d9e01c254652c8",
+ "label": "r6n",
+ "corpus": null,
+ "started_utc": "2026-10-15T17:19:33+00:00",
+ "steps": [
+  {
+   "id": "model",
+   "command": "model",
+   "output": "model.json.gz",
+   "exit": 0,
+   "seconds": 330.8
+  },
+  {
+   "id": "grid",
+   "command": "engine",
+   "output": "grid.json",
+   "exit": 0,
+   "seconds": 114.4
+  },
+  {
+   "id": "c16",
+   "command": "run",
+   "output": "c16.json",
+   "exit": 0,
+   "seconds": 370.8
+  },
+  {
+   "id": "c8",
+   "command": "run",
+   "output": "c8.json",
+   "exit": 0,
+   "seconds": 366.6
+  },
+  {
+   "id": "prefill",
+   "command": "prefill",
+   "output": "prefill.json",
+   "exit": 0,
+   "seconds": 1271.7
+  }
+ ],
+ "finished_utc": "2026-10-15T18:00:27+00:00"
+}

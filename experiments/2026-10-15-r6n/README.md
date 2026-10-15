@@ -1,5 +1,7 @@
 # r6n: r6m with Engram rows v2
 
+**Promoted for TP4 on 2026-10-15** as [`2026-10-15-karmic-kraken-r6n`](../../manifests/baselines/2026-10-15-karmic-kraken-r6n.json), on the release below ([suite run](../../manifests/suites/2026-10-15-karmic-kraken-r6n-tp4/)). Owner: post and promote. The TP3 shapes resolve to r6n but stay unqualified until the triangle is re-cabled and released. The r6k recipe this release ran against is frozen in [r6k/cluster.json](r6k/cluster.json) with its lock.
+
 r6m (experiments/2026-10-14-r6m) was not promoted: against r6k it had the same bits,
 decode 1.2% faster on the geometric mean of the grid and up to 4.5% at small row
 counts, but every prefill size 10-13% slower and the 72- and 96-row decode steps

@@ -653,8 +653,13 @@ class ReferenceShapeTest(unittest.TestCase):
                 self.assertTrue(named and reference.is_file())
                 relative = reference.relative_to(ROOT)
                 self.assertEqual(relative.parent.as_posix(), "manifests/benchmarks")
-                # A promotion that moves promoted_baseline moves the reference too.
-                self.assertTrue(relative.stem.startswith(cluster["promoted_baseline"]))
+                # A promotion that moves promoted_baseline moves the reference too, unless the
+                # build was released on the servebench suite: its baseline names that run, and
+                # the shape keeps its last bench run until a bench runs on the promoted build.
+                if not relative.stem.startswith(cluster["promoted_baseline"]):
+                    baseline = spark.read_json(f"manifests/baselines/{cluster['promoted_baseline']}.json")
+                    suite = json.loads((ROOT / baseline["release_suite"] / "suite.json").read_text())
+                    self.assertEqual(suite["suite"]["name"], "release")
                 identity = json.loads(reference.read_text())["identity"]
                 self.assertEqual(
                     spark.shape_differences(spark.profile_shape(cluster, nodes), spark.bench_shape(identity)),

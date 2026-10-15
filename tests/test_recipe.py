@@ -20,16 +20,37 @@ def load(relative: str) -> dict:
     return json.loads((ROOT / relative).read_text())
 
 
+def load_spark():
+    import importlib.machinery
+    import importlib.util
+
+    loader = importlib.machinery.SourceFileLoader("spark", str(ROOT / "bin" / "spark"))
+    spec = importlib.util.spec_from_loader("spark", loader)
+    spark = importlib.util.module_from_spec(spec)
+    loader.exec_module(spark)
+    return spark
+
+
 class RecipeTest(unittest.TestCase):
     def setUp(self):
         self.recipe = load("config/cluster.json")
 
-    def test_tp4_ring_is_todays_production_file(self):
-        """The unification changes nothing for TP4: the recipe resolves to r6k's file."""
-        resolved = recipe.resolve(self.recipe, "tp4-ring")
+    def test_tp4_ring_was_r6ks_production_file(self):
+        """The unification changed nothing for TP4: r6k's recipe, frozen at r6n's
+        promotion, resolves to r6k's file."""
+        resolved = recipe.resolve(load("experiments/2026-10-15-r6n/r6k/cluster.json"), "tp4-ring")
         expected = dict(load("experiments/2026-10-14-one-recipe/tp4-r6k-production.json"),
                         shape="tp4-ring", schema_version=1)
         self.assertEqual(resolved, expected)
+
+    def test_tp4_ring_is_the_released_r6n_arm(self):
+        """Promotion runs what the release measured: tp4-ring resolves to r6n's release
+        arm, apart from the baseline, lock and reference that name it."""
+        resolved = recipe.resolve(self.recipe, "tp4-ring")
+        released = load_spark().read_cluster("experiments/2026-10-15-r6n/r6n-release.json")
+        naming = ("promoted_baseline", "upstreams_config", "benchmark_reference", "shape")
+        self.assertEqual({k: v for k, v in resolved.items() if k not in naming},
+                         {k: v for k, v in released.items() if k not in naming})
 
     def test_tp3_keeps_its_cabling_and_sizing(self):
         """TP3 keeps what the triangle and its memory need, and nothing else of r6h."""
@@ -43,7 +64,7 @@ class RecipeTest(unittest.TestCase):
                 self.assertEqual(resolved["environment"].get(key), value, key)
         tp4 = recipe.resolve(self.recipe, "tp4-ring")
         self.assertEqual(resolved["container"], tp4["container"])  # one image and run arguments for every shape
-        self.assertNotIn("benchmark_reference", resolved)  # r6k is not benched on TP3
+        self.assertNotIn("benchmark_reference", resolved)  # r6n is not benched on TP3
 
     def test_only_the_cabling_and_memory_differ_between_shapes(self):
         tp3, tp4 = (recipe.resolve(self.recipe, name) for name in ("tp3-triangle", "tp4-ring"))
@@ -101,12 +122,12 @@ class OverlayTest(unittest.TestCase):
         base = recipe.resolve(load("config/cluster.json"), "tp4-ring")
         arm = {"extends": {"config": "config/cluster.json", "shape": "tp4-ring"},
                "set": {"container": {"image": "x:y"}, "environment": {"NEW": "1"}},
-               "unset": ["environment.SPARKNET_ROCE_SPIN_LIMIT"]}
+               "unset": ["environment.SPARKNET_ROCE_TIMEOUT_MS"]}
         resolved = recipe.overlay(arm, base)
         self.assertEqual(resolved["container"]["image"], "x:y")
         self.assertEqual(resolved["container"]["name"], base["container"]["name"])  # merged, not replaced
         self.assertEqual(resolved["environment"]["NEW"], "1")
-        self.assertNotIn("SPARKNET_ROCE_SPIN_LIMIT", resolved["environment"])
+        self.assertNotIn("SPARKNET_ROCE_TIMEOUT_MS", resolved["environment"])
         self.assertNotIn("shape", resolved)
         self.assertNotIn("benchmark_reference", resolved)
         with self.assertRaises(SystemExit):
@@ -115,13 +136,7 @@ class OverlayTest(unittest.TestCase):
             recipe.overlay({"extends": {}, "container": {}}, base)
 
     def test_r6m_changes_only_its_own_settings_over_r6l(self):
-        import importlib.machinery
-        import importlib.util
-
-        loader = importlib.machinery.SourceFileLoader("spark", str(ROOT / "bin" / "spark"))
-        spec = importlib.util.spec_from_loader("spark", loader)
-        spark = importlib.util.module_from_spec(spec)
-        loader.exec_module(spark)
+        spark = load_spark()
         r6l = load("experiments/2026-10-14-r6l/r6l-release.json")
         r6m = spark.read_cluster("experiments/2026-10-14-r6m/r6m-release.json")
         self.assertEqual({k for k in set(r6l["environment"]) | set(r6m["environment"])
