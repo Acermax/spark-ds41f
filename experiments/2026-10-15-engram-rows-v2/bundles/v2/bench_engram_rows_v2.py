@@ -11,11 +11,15 @@ Measured here:
 - the gather: v2's wait and gather together, and its gather alone, against B12X's
   Triton lookup on the same published rows, at 16 to 8192 tokens, with every row on
   this rank and with a quarter of them (TP4);
-- a step's two tables: from staging, when each table's rows are ready, v2's ordered
-  worker against B12X's reader reading the two tables one after the other on one
-  thread, on the same random rows of a 1 GiB table, alternating which runs first.
+- a step's two tables: when each table's rows are ready, v2's ordered worker against
+  B12X's reader reading the two tables one after the other on one thread, on the same
+  random rows of a 1 GiB table, alternating which runs first, two ways:
+  - GPU idle at staging (the row IDs are on the host at once): from staging;
+  - GPU busy at staging, as in serving, where the runner stages a step while the GPU
+    still runs the previous one: a 3 ms kernel runs first, and the time counts from
+    when it ends (the IDs exist).
 Verdict: the gather (wait included) no slower than B12X's lookup by more than 3 us at
-any size, and table 0's rows no later than B12X's by more than 5%.
+any size, and table 0's rows no later than B12X's by more than 5% with the GPU busy.
 """
 import os
 import statistics
@@ -39,6 +43,7 @@ MAX_TOKENS = 8192
 GATHER_TOKENS = (16, 96, 512, 2048, 8192)
 STEP_TOKENS = (96, 2048, 8192)
 STEPS = 8
+BUSY_MS = 3.0
 GATHER_SLACK_US, READ_BUDGET = 3.0, 1.05
 
 
@@ -133,42 +138,60 @@ for label, (start, end) in (("all rows local", (0, TABLE_ROWS)), ("a quarter loc
               f"{'bits equal' if same else 'BITS DIFFER'}{'' if ok else '  FAIL'}", flush=True)
     rows.close()
 
-print("a step's two tables: ms from staging until each table's rows are ready "
-      "(median of the steps; a quarter of the rows local)", flush=True)
+def busy_cycles(ms):
+    """Clock cycles that make torch.cuda._sleep run for about ``ms``."""
+    probe = 2_000_000
+    begin, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+    torch.cuda.synchronize()
+    begin.record()
+    torch.cuda._sleep(probe)
+    end.record()
+    torch.cuda.synchronize()
+    return int(probe * ms / begin.elapsed_time(end))
+
+
+cycles = busy_cycles(BUSY_MS)
 v2 = [v2_rows(paths, *quarter), v2_rows(paths, *quarter)]
 old = [b12x_rows(paths, *quarter), b12x_rows(paths, *quarter)]
-for tokens in STEP_TOKENS:
-    count = tokens * HEADS
-    times = {"v2": [], "b12x": []}
-    for step in range(STEPS):
-        ids = [torch.randint(0, TABLE_ROWS, (count,), generator=gen, device=DEVICE) for _ in range(2)]
-        for name in (("v2", "b12x") if step % 2 == 0 else ("b12x", "v2")):
-            torch.cuda.synchronize()
-            start = time.perf_counter()
-            if name == "v2":
-                for table, rows in enumerate(v2):
-                    rows.stage(stream, ids[table], count)
-                ready = [None, None]
-                while None in ready:
+for busy in (False, True):
+    print(f"a step's two tables, GPU {'busy' if busy else 'idle'} at staging: ms until each table's rows "
+          f"are ready{', from the end of the busy kernel' if busy else ', from staging'} "
+          "(median of the steps; a quarter of the rows local)", flush=True)
+    for tokens in STEP_TOKENS:
+        count = tokens * HEADS
+        times = {"v2": [], "b12x": []}
+        for step in range(STEPS):
+            ids = [torch.randint(0, TABLE_ROWS, (count,), generator=gen, device=DEVICE) for _ in range(2)]
+            for name in (("v2", "b12x") if step % 2 == 0 else ("b12x", "v2")):
+                torch.cuda.synchronize()
+                start = time.perf_counter()
+                if busy:
+                    torch.cuda._sleep(cycles)
+                    start += BUSY_MS / 1e3
+                if name == "v2":
                     for table, rows in enumerate(v2):
-                        if ready[table] is None and published(rows):
-                            ready[table] = time.perf_counter() - start
-                        if rows.failure():
-                            raise RuntimeError(rows.failure())
-            else:
-                ready = []
-                for table, cache in enumerate(old):
-                    with cache.transaction():
-                        cache.read_rows(ids[table], count)
-                    ready.append(time.perf_counter() - start)
-            times[name].append(ready)
-    t0 = {k: statistics.median(r[0] for r in v) * 1e3 for k, v in times.items()}
-    t1 = {k: statistics.median(r[1] for r in v) * 1e3 for k, v in times.items()}
-    ok = t0["v2"] <= t0["b12x"] * READ_BUDGET
-    if not ok:
-        failures.append(f"step {tokens}: table 0 at {t0['v2']:.2f} ms against {t0['b12x']:.2f}")
-    print(f"  {tokens:5d} tokens  table 0: v2 {t0['v2']:7.2f}  b12x {t0['b12x']:7.2f}   "
-          f"table 1: v2 {t1['v2']:7.2f}  b12x {t1['b12x']:7.2f}{'' if ok else '  FAIL'}", flush=True)
+                        rows.stage(stream, ids[table], count)
+                    ready = [None, None]
+                    while None in ready:
+                        for table, rows in enumerate(v2):
+                            if ready[table] is None and published(rows):
+                                ready[table] = time.perf_counter() - start
+                            if rows.failure():
+                                raise RuntimeError(rows.failure())
+                else:
+                    ready = []
+                    for table, cache in enumerate(old):
+                        with cache.transaction():
+                            cache.read_rows(ids[table], count)
+                        ready.append(time.perf_counter() - start)
+                times[name].append(ready)
+        t0 = {k: statistics.median(r[0] for r in v) * 1e3 for k, v in times.items()}
+        t1 = {k: statistics.median(r[1] for r in v) * 1e3 for k, v in times.items()}
+        ok = not busy or t0["v2"] <= t0["b12x"] * READ_BUDGET
+        if not ok:
+            failures.append(f"step {tokens}: table 0 at {t0['v2']:.2f} ms against {t0['b12x']:.2f}")
+        print(f"  {tokens:5d} tokens  table 0: v2 {t0['v2']:7.2f}  b12x {t0['b12x']:7.2f}   "
+              f"table 1: v2 {t1['v2']:7.2f}  b12x {t1['b12x']:7.2f}{'' if ok else '  FAIL'}", flush=True)
 for rows in v2:
     print(f"  v2 reader stats: {rows.stats()}", flush=True)
     rows.close()
