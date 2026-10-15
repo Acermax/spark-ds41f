@@ -115,14 +115,14 @@
  },
  "capacity": {
   "kv_cache_bytes_per_rank": 11274289152,
-  "kv_cache_tokens": null,
+  "kv_cache_tokens": 8580566,
   "max_model_len": 1048576,
   "max_num_seqs": 16,
-  "reported_full_context_concurrency": null,
-  "graph_capture_gib": null,
+  "reported_full_context_concurrency": 8.18,
+  "graph_capture_gib": 2.27,
   "display_carveout_weights_mib": 0,
   "checkpoint_native_max_position_embeddings": 1048576,
-  "note": "KV capacity is fixed by --kv-cache-memory-bytes and equals r6k's; the token count and graph capture are read from the deployed service after deployment"
+  "note": "KV capacity is fixed by --kv-cache-memory-bytes and equals r6k's; the values were read from the deployed service on 2026-10-15 (GPU KV cache 8,580,566 tokens, 8.18x for 1,048,576; rank 0 graph capture 2.27 GiB)"
  },
  "change_from_previous": "TP4: r6k plus r6l (kernel NaN contracts; the shared and routed SwiGLU clamps and the Engram gate floor keep a NaN; the engine cost grid RPC), r6m (no fallback in the RoCE collective policy; sparknet timeout-stop collectives that stop on a timed-out wait; host rendezvous at startup; the draft budget run eagerly, which removes the first-request crash's trigger) and Engram rows v2 (a native reader in layer order, one bounded wait per table, a TileLang gather of this rank's rows). Temperature-0 outputs are identical to r6k's. TP3 shapes resolve to r6n but stay unqualified (no benchmark_reference) until the triangle is re-cabled and released.",
  "evidence": {
@@ -170,5 +170,6 @@
    "swap": "/swap-64k.img"
   }
  },
- "release_suite": "manifests/suites/2026-10-15-karmic-kraken-r6n-tp4/"
+ "release_suite": "manifests/suites/2026-10-15-karmic-kraken-r6n-tp4/",
+ "deployment": "TP4 production since 2026-10-15 20:16 UTC from cba403f (cluster sync --revision, cluster start --apply --replace; API ready in 89 s); doctor --live matches (only the weight-fragmentation warnings); a temperature-0 sanity request answered correctly"
 }
