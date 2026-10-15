@@ -16,9 +16,10 @@ and timed r6m's parts against B12X's on the same data
 - B12X's lookup reads only this rank's rows (about a quarter at TP4) and B12X's
   reader reads the two tables one after the other, so the first Engram layer's rows
   are never held back by the second's. r6m lost both.
-- On novel text an 8K chunk reads about 146K 4 KiB blocks, 600 MB and 100 ms per
-  table and rank. The release suite's default prefill text repeats 18 words, so its
-  rows stay in a few blocks: the release never measures Engram I/O.
+- On random rows an 8K chunk reads about 146K 4 KiB blocks, 600 MB and 100 ms per
+  table and rank. The release suite's prefill sends real text (the Python standard
+  library's source, with a fresh cache salt), so its numbers include Engram I/O on
+  real n-grams.
 
 ## v2 (vLLM branch `engram-io-v2`, on r6m's 0145)
 
@@ -52,5 +53,4 @@ On the r6m image with v2's files overlaid, dgx4:
 - a step's two tables from staging: table 0's rows no later than B12X's serial reader
   by more than 5%.
 
-Only if both pass: an image, the gate, qualify's boots and the release against r6k,
-with a novel-text prefill beside the suite's so Engram I/O shows.
+Only if both pass: an image, the gate, qualify's boots and the release against r6k.
