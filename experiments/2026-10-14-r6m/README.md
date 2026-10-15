@@ -58,6 +58,10 @@ image, the trees, the lock, `SPARK3_ENGRAM_ASYNC` (retired) and `SPARKNET_ROCE_K
    node's log and sparknet trace; then two boots with every Engram read delayed
    200 ms ([r6m-delay.json](r6m-delay.json)), which must wait for their rows, never
    hang (r6k hung on 2 of 2).
+   [qualify-boots.json](qualify-boots.json) repeats qualify's boots, most important
+   first (the delay boots, the traced boots, then the cold cache): a failed boot ends a
+   run, and the cold-cache boot failed on 2026-10-15 (dgx2's rank exited 1 right after
+   its engine started; the plain arm boots).
 3. [release.json](release.json): the release suite against r6k.
 
 TP3 follows once these pass: see experiments/2026-10-14-one-recipe ("Releasing TP3").
