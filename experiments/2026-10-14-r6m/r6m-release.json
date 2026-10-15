@@ -1,7 +1,7 @@
 {
   "notes": "r6l plus: the RoCE policy without fallbacks (vLLM 0142); a stopped collective named as the cause and host rendezvous at startup (vLLM 0143); sparknet timeout-stop (TileLang kernels only, timed waits, trap on timeout); the draft budget run eagerly (vLLM 0144); disk Engram rows from a native reader, gathered in the forward (vLLM 0145).",
   "extends": {
-    "config": "config/cluster.json",
+    "config": "experiments/2026-10-15-r6n/r6k/cluster.json",
     "shape": "tp4-ring"
   },
   "set": {

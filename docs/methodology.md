@@ -93,7 +93,12 @@ A promotion commit must:
 7. add the deployed service's complete `bin/spark bench` report as
    `manifests/benchmarks/<baseline>.json`, the reference later runs compare with.
    Each promoted profile of another topology gets its own run (for example
-   `<baseline>-tp4.json`), named by that profile's `benchmark_reference`.
+   `<baseline>-tp4.json`), named by that profile's `benchmark_reference`. A build
+   released on the servebench release suite is promoted on that run instead, without
+   another bench: commit the candidate arm's suite run as
+   `manifests/suites/<baseline>-<shape>/` (every step's output except the model
+   step's generated text, plus the release table), name it as the baseline's
+   `release_suite`, and keep the shape's `benchmark_reference` on its last bench run.
 
 Rollback is a new coordinated deployment of the previous promoted commit. It is
 not an ad hoc reconstruction from shell history.

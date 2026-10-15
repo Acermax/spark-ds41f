@@ -33,15 +33,14 @@ before tuning anything on this basis.
 
 ## Next release
 
-**r6n** (gating from 2026-10-15, [experiments/2026-10-15-r6n](experiments/2026-10-15-r6n/README.md)):
-r6m (not promoted: prefill 10-13% slower than r6k) with Engram rows v2 and sparknet
-3bc8d10. It carries the selected items below except the indexer ReLU, plus fail-stop
-sparknet, host rendezvous at startup, the eager draft budget and the native Engram
-reader. The indexer ReLU and the index quantizer's NaN handling stay in the kernel
-contracts' rounds (round 6: the BF16 clamp is on the 1% line at 8K x 2048, the
-quantizer 1-3% slower); they join a candidate only within 1% of r6k with its bits.
+**r6n** shipped for TP4 on 2026-10-15
+([experiments/2026-10-15-r6n](experiments/2026-10-15-r6n/README.md)). The indexer
+ReLU and the index quantizer's NaN handling stay in the kernel contracts' rounds
+(round 6: the BF16 clamp is on the 1% line at 8K x 2048, the quantizer 1-3% slower);
+they join a candidate only within 1% of r6n with its bits. TP3 releases r6n at the
+next re-cable.
 
-**After r6n ships:**
+**After r6n:**
 1. Drop `disk_resident_scales` from the recipe's serve arguments, then the field
    (vLLM 0145 accepts it only as false, so the r6k recipe stays valid under
    `doctor --live`).
@@ -61,6 +60,13 @@ quantizer 1-3% slower); they join a candidate only within 1% of r6k with its bit
    identity (its tree labels) to the key and keep one cache directory: a new build
    profiles itself on its first boot and reuses its curves after. Do it before the TP3
    release, whose curves are the stalest.
+7. **A suite run as the benchmark reference.** r6n was promoted on its servebench
+   release suite, so `tp4-ring`'s `benchmark_reference` (the run `bin/spark bench`
+   compares with) is still r6k's bench run. Let `benchmark_reference` name a suite run
+   and compare a new suite run with it, or retire `bin/spark bench`'s default
+   comparison once every release runs the suite.
+8. Merge sparknet `timeout-stop` (on `tilelang-only`) into sparknet's main and tag it:
+   production now runs it from the branch.
 
 **Engram after r6n** (from the 2026-10-15 step back,
 [experiments/2026-10-15-engram-rows-v2](experiments/2026-10-15-engram-rows-v2/README.md)).

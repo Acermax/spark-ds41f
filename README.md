@@ -4,17 +4,21 @@ Reproducible Docker/vLLM deployment, tuning, and benchmarks for DeepSeek V4.1
 Flash on a switchless three-node DGX Spark fabric, and the same deployment on
 a four-node ring.
 
-Production is the four-node TP4 1M profile on **r6k** (2026-10-14,
-[promotion record](experiments/2026-10-13-r6k/README.md)). The three-node
-profiles stay on r6h ([record](experiments/2026-10-12-r6h/README.md)) until
-they boot and bench r6k at the next re-cable. r6k removes the last known
-deviation from DeepSeek's reference precision. B12X's WO projection quantized
-its input to FP8; r6k runs it in TileLang on BF16 activations, as the
-reference's einsum, with WO-B's input cast exactly as the reference's
-`act_quant`. It also moves the drafter's context-KV projection, sparknet's
-collectives and the L2 prefetch to TileLang. As before, it keeps FP32 logits,
-an exact FP32 mHC projection, the shared expert's SwiGLU in FP32, MoE partials
-rounded once, and temperature-0 outputs that do not depend on the batch.
+Production is the four-node TP4 1M profile on **r6n** (2026-10-15,
+[promotion record](experiments/2026-10-15-r6n/README.md)). The three-node
+shapes resolve to the same build but stay unqualified until the triangle is
+re-cabled and released; its last release is r6h
+([record](experiments/2026-10-12-r6h/README.md)). r6n is r6k with Engram rows
+read by a native worker in layer order and gathered in TileLang (one bounded
+wait per table, this rank's rows only), collectives that stop on a timed-out
+wait instead of falling back or computing on unwritten buffers, a host
+rendezvous at startup, no compile on the decode path, and kernels that keep a
+NaN rather than hide it. Its decode steps are 2.2% shorter, prefill and
+throughput are level, and its temperature-0 text is identical to r6k's. r6k
+before it removed the last known deviation from DeepSeek's reference
+precision: FP32 logits, an exact FP32 mHC projection, the shared expert's
+SwiGLU in FP32, MoE partials rounded once, WO on BF16 activations, and
+temperature-0 outputs that do not depend on the batch.
 
 The promoted kernel family is **TileLang** (r6): TileLang kernels for SM121,
 with DeepSeek's TileKernels and the one-shot RoCE collectives of
@@ -96,8 +100,8 @@ unless told to ([launch preflight](docs/doctor.md#launch-preflight)).
 ## Current baseline
 
 The four-node baseline is
-[manifests/baselines/2026-10-13-karmic-kraken-r6k.json](manifests/baselines/2026-10-13-karmic-kraken-r6k.json)
-([promotion record](experiments/2026-10-13-r6k/README.md)). The three-node
+[manifests/baselines/2026-10-15-karmic-kraken-r6n.json](manifests/baselines/2026-10-15-karmic-kraken-r6n.json)
+([promotion record](experiments/2026-10-15-r6n/README.md)). The three-node
 baseline is still
 [manifests/baselines/2026-10-12-karmic-kraken-r6h.json](manifests/baselines/2026-10-12-karmic-kraken-r6h.json)
 ([promotion record](experiments/2026-10-12-r6h/README.md)), on r6h's frozen lock
@@ -192,6 +196,33 @@ To reproduce the deployment on your own Sparks, follow
 [docs/setup.md](docs/setup.md).
 
 ## Performance
+
+r6n against r6k on four nodes (2026-10-15), measured with the release suite
+in one session (r6n, r6k, r6n again; [results](experiments/2026-10-15-r6n/README.md#release-against-r6k-2026-10-15-1925-utc);
+[suite run](manifests/suites/2026-10-15-karmic-kraken-r6n-tp4/)). Each change
+is shown with its 95% interval and judged against the run's own repeat; it
+counts (**bold**) only beyond both.
+
+| Workload | TP4 r6k | TP4 r6n |
+| --- | ---: | ---: |
+| Greedy responses identical, 256 prompts | | 256 of 256 (KL 0) |
+| Decode step time, geometric mean of 20 shapes | | **-2.21%** ±0.15 |
+| Decode step, 1 stream x 3 rows at 4K (ms) | 19.61 | 19.21 (**-2.1%** ±1.3) |
+| Decode step, 1 stream x 3 rows at 256K | 19.75 | 18.88 (**-4.4%** ±1.2) |
+| Decode step, 16 streams x 96 rows at 4K | 51.49 | 51.01 (**-0.9%** ±0.7) |
+| Decode, 16 different prompts at once (tok/s) | 224.6 | 226.5 (+0.9% ±1.0) |
+| Decode, 8 different prompts at once | 180.8 | 181.2 (+0.2% ±0.7) |
+| Source-text prefill, 32K (tok/s) | 5,685 | 5,714 (+0.5% ±0.3) |
+| Prefill, 128K | 5,642 | 5,669 (+0.5% ±1.2) |
+| Prefill, 256K | 5,407 | 5,430 (+0.4% ±0.5) |
+| Prefill, 512K | 4,942 | 4,959 (+0.4% ±0.4) |
+| Prefill, 1M | 4,237 | 4,248 (+0.3% ±0.7) |
+
+Every one of the 20 decode shapes is shorter. The 32K prefill gain is beyond its
+interval but not beyond the repeat's -0.3%, so it counts as level. r6m, the
+candidate before r6n, was 10-13% slower at every prefill size because its Engram
+gather polled host memory from every block
+([engram-rows-v2](experiments/2026-10-15-engram-rows-v2/README.md)).
 
 r6k against r6h on four nodes (2026-10-13), measured with the
 [release comparison](docs/lab.md#release-comparison) in one session, candidate
