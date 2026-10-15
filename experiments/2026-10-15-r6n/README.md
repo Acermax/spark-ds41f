@@ -61,6 +61,26 @@ TP3 follows once these pass: see experiments/2026-10-14-one-recipe ("Releasing T
   every step, dumps every thread's stack after 240 s, and runs the tests that stop the
   GPU last; it reruns the whole sequence after the release.
 
+## Release against r6k (2026-10-15, 19:25 UTC)
+
+r6n, r6k, then r6n again, in one session on TP4. Verdicts against the run's own repeat:
+
+| metric | r6k to r6n | ±95% | repeat (r6n to r6n again) | verdict |
+|---|---|---|---|---|
+| decode step time, geometric mean of 20 shapes | -2.21% | 0.15% | +0.17% | better |
+| 16 streams, output tok/s | +0.85% | 0.98% | -0.09% | same |
+| 8 streams, output tok/s | +0.20% | 0.71% | +0.05% | same |
+| prefill 32K tok/s | +0.50% | 0.34% | -0.27% | same |
+| prefill 128K | +0.48% | 1.17% | -0.23% | same |
+| prefill 256K | +0.44% | 0.49% | -0.19% | same |
+| prefill 512K | +0.35% | 0.37% | -0.09% | same |
+| prefill 1M | +0.25% | 0.67% | -0.06% | same |
+
+Every one of the 20 decode shapes is shorter (0.9% at 96 rows to 4.4% at one stream and
+256K of context), where r6m was up to 2.3% longer at 72 and 96 rows; prefill is level
+where r6m was 10-13% slower. Model behaviour is identical: 256 of 256 greedy responses,
+and the teacher-forced distributions match exactly (KL 0). Nothing is slower than r6k.
+
 ## Credits
 
 huxiaofengtiger reported r6h's TP3 startup failures on the NVIDIA Developer Forums
