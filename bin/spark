@@ -741,6 +741,18 @@ HOST_FACTS_QUERY += r"""printf 'nvme_coalescing=%s\n' "$(for c in /dev/nvme[0-9]
   printf '%s:%s\n' "${c#/dev/}" "$(sudo -n nvme get-feature "$c" -f 8 2>/dev/null | awk -F'value:' 'NF > 1 {print $2}')"
 done | paste -sd, -)"
 printf 'nvme_coalescing_service=%s\n' "$(systemctl is-enabled nvidia-nvme-interrupt-coalescing.service 2>/dev/null)"
+printf 'nvme_apst=%s\n' "$(for c in /dev/nvme[0-9]*; do
+  [ -c "$c" ] || continue
+  table=$(sudo -n nvme get-feature "$c" -f 0x0c -H 2>/dev/null | awk '
+    /APSTE/ {enabled = ($0 ~ /Enabled/) ? 1 : 0}
+    /Entry\[/ {entry = $0; gsub(/[^0-9]/, "", entry)}
+    /\(ITPT\)/ {idle = $(NF - 1)}
+    /\(ITPS\)/ {if (idle > 0) chain = chain entry ">" $NF "@" idle " "}
+    END {printf "en=%s|%s", enabled, chain}')
+  exits=$(sudo -n nvme id-ctrl "$c" 2>/dev/null | awk '
+    /^ps +[0-9]+ :/ {for (f = 1; f <= NF; f++) if ($f ~ /^exlat:/) {sub("exlat:", "", $f); printf "%s:%s ", $2, $f}}')
+  printf '%s|%s|%s\n' "${c#/dev/}" "$table" "$exits"
+done | paste -sd, -)"
 """
 
 
@@ -908,6 +920,76 @@ NVME_COALESCING_FIX = (
     "sudo systemctl mask --now nvidia-nvme-interrupt-coalescing.service && "
     "sudo /usr/bin/nvidia-nvme-interrupt-coalescing.sh disable"
 )
+
+
+# APST may put an idle drive to sleep, but not on the Engram reader's critical path:
+# no state with this exit latency (us) or more before this much idle (ms).
+NVME_APST_LIMITS = ((5000, 1000), (20000, 30000))
+NVME_APST_FIX = (
+    "set nvme_core apst_primary_timeout_ms=2000 and apst_secondary_timeout_ms=60000: now "
+    "with echo 2000 | sudo tee /sys/module/nvme_core/parameters/apst_primary_timeout_ms, "
+    "echo 60000 | sudo tee /sys/module/nvme_core/parameters/apst_secondary_timeout_ms "
+    "and rewriting each controller's power/pm_qos_latency_tolerance_us to re-arm APST; "
+    "at boot with 'options nvme_core apst_primary_timeout_ms=2000 "
+    "apst_secondary_timeout_ms=60000' in /etc/modprobe.d/nvme-apst.conf and "
+    "sudo update-initramfs -u"
+)
+
+
+def nvme_apst_warnings(node_name: str, facts: dict[str, str]) -> list[str]:
+    """NVMe autonomous power state transitions (APST, feature 0x0c) that sleep too soon.
+
+    With the kernel's defaults (apst_primary_timeout_ms=100) the fleet's drives enter
+    PS3 (11 ms exit latency) after 100 ms idle and PS4 (46 ms) 2 s later. The Engram
+    reader's first read after a pause then waits for the drive to wake: on TP3 at
+    eight streams, whose steps exceed 100 ms, the GPU waited 1.5 s for Engram rows
+    in a 62 s run and throughput was 3% lower than with the drive kept awake
+    (experiments/2026-10-16-r6p). Each controller's chain of transitions from PS0
+    must reach no state of NVME_APST_LIMITS' exit latency before its idle time.
+    These are warnings: a sleeping drive costs latency, not correctness.
+    """
+    warnings = []
+    for entry in filter(None, facts.get("nvme_apst", "").split(",")):
+        # controller|en=<0|1>|<state>><target>@<idle ms> ...|<state>:<exit us> ...
+        controller, enabled, chain, exits = (entry.split("|") + ["", "", ""])[:4]
+        enabled = enabled.removeprefix("en=")
+        exit_us = {}
+        for item in exits.split():
+            state, _, latency = item.partition(":")
+            if state.isdigit() and latency.isdigit():
+                exit_us[int(state)] = int(latency)
+        if enabled not in ("0", "1") or not exit_us:
+            warnings.append(Warn(
+                f"{node_name}: cannot read NVMe APST on {controller} (nvme get-feature -f 0x0c "
+                "and nvme id-ctrl need passwordless sudo and nvme-cli)"
+            ))
+            continue
+        if enabled == "0":
+            continue
+        transitions = {}
+        for item in chain.split():
+            source, _, rest = item.partition(">")
+            target, _, idle = rest.partition("@")
+            if source.isdigit() and target.isdigit() and idle.isdigit() and int(idle) > 0:
+                transitions[int(source)] = (int(target), int(idle))
+        state, idle, seen = 0, 0, {0}
+        while state in transitions:
+            target, wait = transitions[state]
+            state, idle = target, idle + wait
+            if state in seen:
+                break
+            seen.add(state)
+            latency = exit_us.get(state, 0)
+            for limit_us, limit_ms in NVME_APST_LIMITS:
+                if latency >= limit_us and idle < limit_ms:
+                    warnings.append(Warn(
+                        f"{node_name}: {controller} sleeps in PS{state} ({latency / 1000:g} ms "
+                        f"to wake) after {idle} ms idle, and the Engram reader's first read "
+                        f"after a pause waits for it (no state of {limit_us / 1000:g} ms or "
+                        f"more before {limit_ms} ms idle); {NVME_APST_FIX}"
+                    ))
+                    break
+    return warnings
 
 
 def nvme_coalescing_warnings(node_name: str, facts: dict[str, str]) -> list[str]:
@@ -1144,6 +1226,7 @@ def live_doctor(cluster: dict, nodes: dict) -> list[str]:
         problems.extend(splash_problems(node["name"], facts))
         problems.extend(idle_service_warnings(node["name"], facts))
         problems.extend(nvme_coalescing_warnings(node["name"], facts))
+        problems.extend(nvme_apst_warnings(node["name"], facts))
         problems.extend(fan_control_problems(
             node["name"], facts, fan_control=fan_control_enabled(cluster)))
         gid_index, hcas = roce_gid_setting(cluster, node)
