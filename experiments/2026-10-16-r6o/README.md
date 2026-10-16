@@ -122,3 +122,34 @@ ones it declines reach this path. The anonymous copy is freed when the copy retu
 
 huxiaofengtiger reported r6h's TP3 startup failures on the NVIDIA Developer Forums
 (r6n's README has the details); vLLM 0143 now carries the credit.
+
+## Results (TP3, 2026-10-16)
+
+- **Gate passed.**
+  - The image is the second build, with 0147 copying through anonymous memory. The
+    first build's boot was stopped by the startup memory guard.
+  - Temperature-0 and greedy outputs have zero token and logprob differences in every
+    scenario, both on the boot with `SPARK3_ENGRAM_CHECK_EARLY_IDS=1` and on the plain
+    boot.
+  - The token and text reference digests equal r6n's gate digests exactly.
+  - 8 distinct streams: 137.2 tok/s (±0.55%). 4 streams: 109.0 (±1.6%).
+- **Prefill profile (16K, [engram_costs.py](engram_costs.py)).** The faster ranks wait
+  for dgx3's rows inside the rows all-reduce, so wait plus all-reduce is the Engram time
+  on each rank's critical path:
+
+  | arm | wait + rows all-reduce, dgx1 / dgx2 / dgx3 (ms) | 16K prefill span (ms) |
+  |---|---|---|
+  | r6n | 151 / 151 / 152 | 3,945-3,956 |
+  | r6o | 58 / 58 / 59 | 3,848-3,853 |
+  | r6o again | 66 / 66 / 66 | 3,874-3,885 |
+
+  r6o is 70-100 ms faster per 16K prefill (1.8-2.4%). The remaining 11-35 ms wait fits
+  each prompt's first chunk, which has no previous step to read under.
+- **Single-stream decode:** level with r6n (1,647 ms for 128 tokens on both; Engram
+  wait 4-7 ms).
+- **Eight streams:** 1.6-2.0% fewer tok/s than r6n, but not an Engram comparison. A
+  profiling arm's serve arguments (the profiler directory) give it its own build
+  fingerprint, hence freshly profiled DSpark cost curves, and adaptive verification
+  then chose different draft budgets. r6o's steps ran different MoE row counts from
+  r6n's (240-row grids against 192). r6p's profile pins every arm to production r6n's
+  curves, and the release suite's engine grid times fixed-row steps.

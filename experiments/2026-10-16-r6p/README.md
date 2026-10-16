@@ -37,8 +37,12 @@ Source: vLLM tree `4c53bdf5` (patch head `dbfa162e`).
 1. **Image (dgx4).** Built from main and copied to dgx1-3.
 2. [gate.json](gate.json): temperature-0 determinism and greedy output must be
    byte-identical to r6o's and r6n's; then 8 and 4 distinct streams.
-3. [profile.json](profile.json): the 16K prefill on r6p, r6o and r6p again. The
-   `[4048, 8544]` all-gathers become all-to-alls of a third of the bytes.
+3. [profile.json](profile.json): torch-profiled r6p, r6o, r6n and r6p again on a 16K
+   prefill, a single-stream decode and an eight-stream window. Every arm uses
+   production r6n's DSpark cost curves. A profiling arm's serve arguments otherwise
+   give it fresh curves: in r6o's profile the eight-stream steps had different row
+   counts from r6n's, which hid any Engram effect on decode. In prefill, the
+   `[4048, 8544]` all-gathers should become all-to-alls of a third of the bytes.
 4. [release.json](release.json): the release-tp3 suite on r6p, r6n and r6p again. This
    is the release comparison for the whole Engram change set. The owner decides
    promotion.
