@@ -5542,10 +5542,12 @@ def command_bench(args: argparse.Namespace) -> int:
     if args.compare is None:
         reference_path, named = benchmark_reference(cluster)
         if is_suite_run(reference_path):
-            print(f"ERROR: benchmark_reference {cluster['benchmark_reference']} is a servebench suite run; "
-                  "compare with it through bench --suite, or pass --compare PATH (or --compare none)")
-            return 1
-        if not reference_path.is_file():
+            # A shape released on the servebench suite has no bench report to compare with;
+            # bench --suite compares with its run.
+            print(f"NOTE: benchmark_reference {cluster['benchmark_reference']} is a servebench suite run; "
+                  "this bench compares with nothing (bench --suite compares with it, or pass --compare PATH)")
+            reference_path = None
+        elif not reference_path.is_file():
             if named:
                 raise SystemExit(f"benchmark_reference does not exist: {cluster['benchmark_reference']}")
             reference_path = None
