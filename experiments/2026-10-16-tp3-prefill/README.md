@@ -58,3 +58,34 @@ r6h's TileLang kernels predate their names (all `main_kernel`), so
   is not a kernel, so the profile cannot compare them; the span difference is fully explained
   by WO. It is the larger lever: prefill read-ahead (TODO, Engram after r6n) would take
   the wait off the critical path, and dgx3, the slowest reader, paces every rank.
+
+## The WO ceiling (dgx4, off the fabric, 2026-10-16 07:14 UTC)
+
+[wo-ceiling/bench_wo_ceiling.py](wo-ceiling/bench_wo_ceiling.py) ([run.sh](wo-ceiling/run.sh), r6n
+image, kbench timing: CUDA graphs, warm / cold) at the serving shapes: TP3 24 heads in 3 groups a
+rank, TP4 16 heads in 2; rows of the sequence-parallel prefill slice (TP3 683, TP4 1024) and
+twice that. Cold, us per call:
+
+| shape, rows | B12X fused WO | TileLang WO | inverse RoPE | WO-A (BF16 MMA) | WO-B (MXFP8) | cuBLAS BF16 WO-A |
+|---|---:|---:|---:|---:|---:|---:|
+| TP3, 683 | 359.5 | 491.5 (1.37x) | 14.3 | 270.3 (64 TFLOP/s) | 206.8 | 295.7 (58 TFLOP/s) |
+| TP3, 1366 | 760.8 | 863.2 (1.13x) | 23.6 | 489.8 (70) | 336.9 | 557.0 (62) |
+| TP4, 1024 | 368.5 | 464.7 (1.26x) | 14.1 | 255.8 (67) | 187.2 | 274.3 (63) |
+| TP4, 2048 | 763.9 | 824.1 (1.08x) | 24.6 | 481.3 (71) | 318.3 | 542.5 (63) |
+
+- **WO-A is at GB10's BF16 ceiling.** It is faster than cuBLAS's BF16 bmm on weights widened
+  once, so widening in the loop costs nothing measurable. Of 32 tiles (64-128 rows, 64-128
+  columns, 2-3 stages, 128-256 threads), today's is within 0.4% of the best at TP3 683 rows and
+  2.4% at TP4 1024; every working tile gives the same bytes.
+- **WO-B runs at the FP8 rate** (about 104 TFLOP/s at TP3 683 rows), level with B12X's.
+- **The gap is the reference's precision.** WO-A on BF16 activations is a BF16 MMA (GB10: about
+  65-70 TFLOP/s against about 105 for FP8). B12X quantized WO-A's activations to FP8, which is
+  why it is faster, and is the deviation r6k removed. The same FLOPs as FP8 would take about
+  160 us at 683 rows against 270. No tile closes that.
+- At decode B12X's one kernel stays ahead (1.03-1.28x cold), as r6k measured.
+
+So the WO cost stays (it is what reference precision costs on this GPU). The prefill time to
+win back on both topologies is the Engram wait (above): table 0's rows are read only after the
+GPU hashes the chunk at the step's start, about 50 ms before layer 1 needs them, so every chunk
+waits 4-36 ms (dgx3 119 ms per 16K prefill, about 3%), while table 1, needed at layer 14, is
+always ready.
