@@ -1,4 +1,4 @@
-From 383f3d1ff7389992fdb6d0d3a8e4d813fd2b753d Mon Sep 17 00:00:00 2001
+From dc27f7f00763b234b016343ece6c14d71281c6af Mon Sep 17 00:00:00 2001
 From: Christopher Owen <3221756+christopherowen@users.noreply.github.com>
 Date: Fri, 16 Oct 2026 10:32:02 +0200
 Subject: [PATCH 148/148] DeepSeek-V4.1 Engram: read the rows the host can hash

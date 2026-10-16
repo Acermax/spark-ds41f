@@ -64,7 +64,7 @@ TP3 follows once these pass: see experiments/2026-10-14-one-recipe ("Releasing T
   GPU last; it reruns the whole sequence after the release.
   Root cause, found 2026-10-16: driver R580 on the 64 KiB-page kernel never completes a
   large pageable copy from untouched, unaligned file pages (safetensors' views into
-  the mmapped checkpoint). vLLM 0147 pins such sources first
+  the mmapped checkpoint). vLLM 0147 copies such sources into anonymous memory first
   ([experiments/2026-10-16-r6o](../2026-10-16-r6o/README.md)).
 
 ## Release against r6k (2026-10-15, 19:25 UTC)
