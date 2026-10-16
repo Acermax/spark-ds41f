@@ -1,6 +1,7 @@
 # r6p: r6o's series (experiments/2026-10-16-r6o) with 0149 the SP tests' fixtures for
 # the unreduced mode and the MoE input dtype, and 0150 Engram's wkv product exchanged
-# all-to-all under prefill sequence parallelism instead of all-gathered.
+# all-to-all under prefill sequence parallelism instead of all-gathered, 0151 a debug
+# timeline of each step's Engram rows (SPARK3_ENGRAM_TIMELINE, off in serving).
 # r6o: r6n's series (experiments/2026-10-15-r6n) with the reporter of r6h's TP3 startup
 # failures credited in 0143, 0146 the Engram model test's settled reader counters, 0147
 # checkpoint copies through anonymous memory (R580 on the 64 KiB kernel hangs in a
@@ -153,3 +154,4 @@
 0148-DeepSeek-V4.1-Engram-read-the-rows-the-host-can-hash.patch
 0149-DeepSeek-V4.1-SP-tests-fixtures-for-the-unreduced-mo.patch
 0150-DeepSeek-V4.1-prefill-SP-Engram-s-wkv-product-exchan.patch
+0151-DeepSeek-V4.1-Engram-a-debug-timeline-of-each-step-s.patch

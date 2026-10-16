@@ -4,10 +4,10 @@
  "vllm": {
   "base_revision": "19f2c20ed4d64ae22bd009ceacadd85e2a81e354",
   "patch_series": "experiments/2026-10-16-r6p/vllm/series",
-  "patchset_sha256": "02e7a28a3844f1d8987f43ce01534776ce20c64a15096a3756c0b785a966d196",
-  "expected_tree": "4c53bdf566d707d2e199ee7ce5e4f69bc858394d",
+  "patchset_sha256": "6154636701e5a7ac578dc6d8a9d275c2b131508c808cd74aff3730eac17aa272",
+  "expected_tree": "3b2492ebb0bba4385c5699d3009f44469094d154",
   "verification": "bin/spark build prepare applies the series to the pinned revision and checks this patch head and tree; image label local.spark3.vllm.tree matches",
-  "patch_head": "dbfa162e0de36f80b2ae31c41ea01d51380a6549",
+  "patch_head": "a0519bf586669c6f51395688e3ea87adcfe4e72d",
   "capabilities": [
    "packed-bf16-lm-head",
    "streamed-vocabulary-weights",
@@ -53,7 +53,8 @@
    "engram-native-disk-rows",
    "anonymous-checkpoint-copies",
    "engram-step-aware-rows",
-   "engram-sp-column-exchange"
+   "engram-sp-column-exchange",
+   "engram-debug-timeline"
   ]
  },
  "b12x": {
