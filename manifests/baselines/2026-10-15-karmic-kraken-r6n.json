@@ -170,5 +170,33 @@
    "swap": "/swap-64k.img"
   }
  },
- "deployment": "TP4 production since 2026-10-15 20:16 UTC from cba403f (cluster sync --revision, cluster start --apply --replace; API ready in 89 s); doctor --live matches (only the weight-fragmentation warnings); a temperature-0 sanity request answered correctly"
+ "deployment": "TP4 production since 2026-10-15 20:16 UTC from cba403f (cluster sync --revision, cluster start --apply --replace; API ready in 89 s); doctor --live matches (only the weight-fragmentation warnings); a temperature-0 sanity request answered correctly",
+ "tp3": {
+  "promoted": "2026-10-16",
+  "shape": "tp3-triangle",
+  "nodes": {
+   "dgx1": {
+    "image_id": "sha256:5ec81bee6944e5a08c0a15599b9f826cad9593a76b36e9523652a91fe6fee755",
+    "role": "api-head-rank-0"
+   },
+   "dgx2": {
+    "image_id": "sha256:5ec81bee6944e5a08c0a15599b9f826cad9593a76b36e9523652a91fe6fee755",
+    "role": "headless-rank-1"
+   },
+   "dgx3": {
+    "image_id": "sha256:5ec81bee6944e5a08c0a15599b9f826cad9593a76b36e9523652a91fe6fee755",
+    "role": "headless-rank-2"
+   }
+  },
+  "benchmark_reference": "manifests/suites/2026-10-15-karmic-kraken-r6n-tp3",
+  "dspark_cost_dir": "/cache/kkref/dspark-costs/build-77b3fa3c35f1ce6d (r6n's own TP3 curves, profiled on the release's first r6n boot)",
+  "previous_baseline": "2026-10-12-karmic-kraken-r6h",
+  "evidence": {
+   "experiments": [
+    "experiments/2026-10-15-r6n-tp3/"
+   ],
+   "summary": "Gate on the triangle: temperature 0 identical in all six scenarios. Qualify: probe and fail-stop pass on all ranks; three first-request boots served every request; empty-TileLang-cache boot ready in 409 s. release-tp3 against r6h (2026-10-15 22:00 to 2026-10-16 00:09 UTC, r6n / r6h / r6n again): decode step time -5.46% ±0.14 (every shape shorter, 3.2-7.3%), 8 streams +1.92% ±1.31, 4 streams +2.50% ±2.18; Poisson at 0.42 req/s and prefill 32K-500K level against the repeat; text differs from r6h as r6k's did on TP4 (top-1 95.04%, KL 0.022). Owner, 2026-10-16: promote tp=3."
+  },
+  "capacity": "read from the deployed service after deployment"
+ }
 }

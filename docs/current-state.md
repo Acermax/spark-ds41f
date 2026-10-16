@@ -49,13 +49,14 @@ on r6h's cost curves for that placement (`ring4-r6h-headout-20261012`), as the r
 and r6n release comparisons did. The temperature-0 references are r6k's
 (70b3379cc289 / 708ec5b17482).
 
-The three-node shapes (`tp3-triangle`, `tp3-triangle-4k`) resolve to the
-recipe's r6n image but are not qualified on it until a TP3 release benchmark;
-until then a re-cabled triangle restores r6h from its archived record
-(`experiments/2026-10-14-one-recipe/tp3-r6h-production.json`), which stays on r6h
-([`2026-10-12-karmic-kraken-r6h`](../manifests/baselines/2026-10-12-karmic-kraken-r6h.json),
-image `sha256:0aaa5d8b`, cost curves `tp3-r6h-20261012`). The archived record is pinned
-to r6h's frozen lock (`experiments/2026-10-13-r6k/r6h/upstreams.lock.json`). The TileLang kernel family runs the model;
+The three-node shape `tp3-triangle` runs r6n too, promoted 2026-10-16 on its release
+against r6h ([experiments/2026-10-15-r6n-tp3](../experiments/2026-10-15-r6n-tp3/README.md),
+reference [manifests/suites/2026-10-15-karmic-kraken-r6n-tp3](../manifests/suites/2026-10-15-karmic-kraken-r6n-tp3/)):
+decode 5.5% faster at every shape, 8 and 4 streams faster, prefill level. It schedules
+on its build's cost curves (`build-77b3fa3c35f1ce6d`, profiled on the release's first
+r6n boot). `tp3-triangle-4k` (the 4 KiB-page kernel) is not qualified. r6h's archived
+TP3 record (`experiments/2026-10-14-one-recipe/tp3-r6h-production.json`) stays as the
+rollback. The TileLang kernel family runs the model;
 B12X is the alternative backend in the same image.
 
 | Setting | Active value |

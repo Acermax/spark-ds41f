@@ -306,7 +306,8 @@
         "NCCL_SOCKET_IFNAME": "enP7s7",
         "SPARK3_DISPLAY_CARVEOUT_WEIGHTS": "1",
         "SPARKNET_ROCE_ALLGATHER_MAX_BYTES": "4194304"
-      }
+      },
+      "benchmark_reference": "manifests/suites/2026-10-15-karmic-kraken-r6n-tp3"
     },
     "tp3-triangle-4k": {
       "notes": "TP3 on a stock 4 KiB-page kernel without Memory Saver: smaller KV and context (docs/memory-profiles.md).",

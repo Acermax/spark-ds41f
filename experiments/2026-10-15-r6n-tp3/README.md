@@ -1,5 +1,7 @@
 # r6n on TP3
 
+**Promoted for TP3 on 2026-10-16** (owner: "promote tp=3"); `tp3-triangle`'s `benchmark_reference` is the release's r6n run, [manifests/suites/2026-10-15-karmic-kraken-r6n-tp3](../../manifests/suites/2026-10-15-karmic-kraken-r6n-tp3/).
+
 r6n is TP4 production since 2026-10-15
 ([experiments/2026-10-15-r6n](../2026-10-15-r6n/README.md)). The owner recabled the
 dgx1–dgx2–dgx3 triangle the same evening; the site shape is `tp3-triangle`, and

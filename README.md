@@ -4,11 +4,11 @@ Reproducible Docker/vLLM deployment, tuning, and benchmarks for DeepSeek V4.1
 Flash on a switchless three-node DGX Spark fabric, and the same deployment on
 a four-node ring.
 
-Production is the four-node TP4 1M profile on **r6n** (2026-10-15,
-[promotion record](experiments/2026-10-15-r6n/README.md)). The three-node
-shapes resolve to the same build but stay unqualified until the triangle is
-re-cabled and released; its last release is r6h
-([record](experiments/2026-10-12-r6h/README.md)). r6n is r6k with Engram rows
+Production is **r6n** on both shapes: the four-node TP4 1M profile on the ring
+(2026-10-15, [promotion record](experiments/2026-10-15-r6n/README.md)) and the
+three-node TP3 512K profile on the triangle (2026-10-16,
+[record](experiments/2026-10-15-r6n-tp3/README.md)); the site is cabled as the
+triangle. r6n is r6k with Engram rows
 read by a native worker in layer order and gathered in TileLang (one bounded
 wait per table, this rank's rows only), collectives that stop on a timed-out
 wait instead of falling back or computing on unwritten buffers, a host
@@ -102,10 +102,8 @@ unless told to ([launch preflight](docs/doctor.md#launch-preflight)).
 The four-node baseline is
 [manifests/baselines/2026-10-15-karmic-kraken-r6n.json](manifests/baselines/2026-10-15-karmic-kraken-r6n.json)
 ([promotion record](experiments/2026-10-15-r6n/README.md)). The three-node
-baseline is still
-[manifests/baselines/2026-10-12-karmic-kraken-r6h.json](manifests/baselines/2026-10-12-karmic-kraken-r6h.json)
-([promotion record](experiments/2026-10-12-r6h/README.md)), on r6h's frozen lock
-(`experiments/2026-10-12-r6h/upstreams.lock.json`); see
+profile runs the same baseline since 2026-10-16
+([TP3 record](experiments/2026-10-15-r6n-tp3/README.md)); see
 [docs/current-state.md](docs/current-state.md). The three-node deployment:
 
 - three DGX Spark nodes using tensor parallelism 3, on DGX Spark 26.09.2 with
@@ -196,6 +194,26 @@ To reproduce the deployment on your own Sparks, follow
 [docs/setup.md](docs/setup.md).
 
 ## Performance
+
+r6n against r6h on three nodes (2026-10-16), measured with the `release-tp3` suite
+in one session (r6n, r6h, r6n again; [results](experiments/2026-10-15-r6n-tp3/README.md);
+[suite run](manifests/suites/2026-10-15-karmic-kraken-r6n-tp3/)), r6n on its own
+build's cost curves. Each change is judged against the run's own repeat.
+
+| Workload | TP3 r6h | TP3 r6n |
+| --- | ---: | ---: |
+| Decode step time, geometric mean of 15 shapes | | **-5.5%** ±0.14 |
+| Decode, 8 different prompts at once (tok/s) | 137.1 | 139.7 (**+1.9%** ±1.3) |
+| Decode, 4 different prompts at once | 109.3 | 112.1 (**+2.5%** ±2.2) |
+| Poisson arrivals at 0.42 req/s, goodput (req/s) | 0.280 | 0.290 |
+| Source-text prefill, 32K (tok/s) | 4,200 | 4,181 (-0.4% ±1.5) |
+| Prefill, 128K | 4,128 | 4,114 (-0.3% ±1.2) |
+| Prefill, 256K | 3,970 | 3,948 (-0.5% ±1.2) |
+| Prefill, 500K | 3,638 | 3,625 (-0.4% ±0.3) |
+
+Every decode shape is shorter (3.2-7.3%); prefill moved within the repeat's own -0.4
+to -0.5%, so no size counts as slower. r6n's text differs from r6h's as r6k's did on
+TP4 (top-token agreement 95.0%, KL 0.022 nats).
 
 r6n against r6k on four nodes (2026-10-15), measured with the release suite
 in one session (r6n, r6k, r6n again; [results](experiments/2026-10-15-r6n/README.md#release-against-r6k-2026-10-15-1925-utc);

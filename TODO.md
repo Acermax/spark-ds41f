@@ -37,8 +37,8 @@ before tuning anything on this basis.
 ([experiments/2026-10-15-r6n](experiments/2026-10-15-r6n/README.md)). The indexer
 ReLU and the index quantizer's NaN handling stay in the kernel contracts' rounds
 (round 6: the BF16 clamp is on the 1% line at 8K x 2048, the quantizer 1-3% slower);
-they join a candidate only within 1% of r6n with its bits. TP3 releases r6n at the
-next re-cable.
+they join a candidate only within 1% of r6n with its bits. TP3 runs r6n since
+2026-10-16.
 
 **After r6n:**
 1. Drop `disk_resident_scales` from the recipe's serve arguments, then the field
