@@ -65,7 +65,8 @@ class RecipeTest(unittest.TestCase):
         self.assertNotIn("SPARK3_DSPARK_COST_DIR", resolved["environment"])
         tp4 = recipe.resolve(self.recipe, "tp4-ring")
         self.assertEqual(resolved["container"], tp4["container"])  # one image and run arguments for every shape
-        self.assertNotIn("benchmark_reference", resolved)  # r6n is not benched on TP3
+        self.assertEqual(resolved["benchmark_reference"], "manifests/suites/2026-10-15-karmic-kraken-r6n-tp3")
+        self.assertNotIn("benchmark_reference", recipe.resolve(self.recipe, "tp3-triangle-4k"))  # not benched
 
     def test_only_the_cabling_and_memory_differ_between_shapes(self):
         tp3, tp4 = (recipe.resolve(self.recipe, name) for name in ("tp3-triangle", "tp4-ring"))
