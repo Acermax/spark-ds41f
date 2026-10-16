@@ -197,6 +197,14 @@
    ],
    "summary": "Gate on the triangle: temperature 0 identical in all six scenarios. Qualify: probe and fail-stop pass on all ranks; three first-request boots served every request; empty-TileLang-cache boot ready in 409 s. release-tp3 against r6h (2026-10-15 22:00 to 2026-10-16 00:09 UTC, r6n / r6h / r6n again): decode step time -5.46% ±0.14 (every shape shorter, 3.2-7.3%), 8 streams +1.92% ±1.31, 4 streams +2.50% ±2.18; Poisson at 0.42 req/s and prefill 32K-500K level against the repeat; text differs from r6h as r6k's did on TP4 (top-1 95.04%, KL 0.022). Owner, 2026-10-16: promote tp=3."
   },
-  "capacity": "read from the deployed service after deployment"
+  "capacity": {
+   "kv_cache_tokens": 2845543,
+   "max_model_len": 524288,
+   "max_num_seqs": 8,
+   "reported_full_context_concurrency": 5.43,
+   "graph_capture_gib": 0.42,
+   "note": "read from the deployed service on 2026-10-16 (GPU KV cache 2,845,543 tokens, 5.43x for 524,288; rank 0 graph capture 0.42 GiB); equal to r6h's TP3 KV"
+  },
+  "deployment": "TP3 production since 2026-10-16 06:09 UTC from b696c52 (cluster sync --revision, cluster start --apply --replace, shape unchanged; API ready in 90 s); doctor --live matches (only the weight-fragmentation warnings); it uses the pinned build curves build-77b3fa3c35f1ce6d; a temperature-0 sanity request answered correctly"
  }
 }
