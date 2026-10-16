@@ -36,6 +36,12 @@ def fake_distribution(previous: int, top: int, variant: bool) -> list[tuple[int,
     return [((next_token(previous) + 37 * k) % VOCAB, math.log(p)) for k, p in enumerate(probabilities)]
 
 
+class _ThreadingServer(ThreadingHTTPServer):
+    # The clients open many connections at once; with socketserver's listen backlog of 5,
+    # macOS resets the connections beyond it (Linux queues them).
+    request_queue_size = 128
+
+
 class FakeServer:
     """Streams max_tokens / 2 chunks of two tokens each; counts steps and tokens."""
 
@@ -148,7 +154,7 @@ class FakeServer:
                       "usage": {"prompt_tokens": 7, "completion_tokens": produced}})
                 self.wfile.write(b"data: [DONE]\n\n")
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server = _ThreadingServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
