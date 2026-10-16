@@ -70,3 +70,32 @@ published about 10 ms after the GPU's IDs, for a few hundred lookups a rank.
 distinct streams and the long-line greedy text, without the profiler. Each record
 splits a step into queueing, waiting for the GPU's IDs, reading and publishing, next
 to the GPU's wait for it.
+
+## Result: the drive's power states (2026-10-16)
+
+The timeline found table 0's slow reads bimodal: about 1 ms, or 10-11 ms on about a
+third of eight-stream steps. Only the first read after the drive had been idle was
+slow. The drive's APST, at the kernel's defaults, enters PS3 after 100 ms idle; its
+exit latency is 11 ms. It enters PS4 (46 ms) 2 s later.
+
+| dgx1, table 0 | idle > 100 ms before the read | idle 100 ms or less |
+|---|---|---|
+| reads | 510 | 4,431 |
+| slow (> 5 ms) | 439 (86%) | 0 |
+
+The same run was then repeated with every node's drive kept awake, by one 4 KiB
+direct read every 40 ms from another file:
+
+| | drive sleeping (APST) | drive kept awake |
+|---|---|---|
+| 8 streams: GPU wait for table 0 (dgx1 / dgx3) | 1,503 / 1,484 ms in 62 s | 0.6 / 0.5 ms |
+| 8 streams: steps the GPU waited over 1 ms (dgx1) | 201 of 627 | 0 |
+| 8 streams: table 0 read p90 (dgx1) | 10.6 ms | 1.5 ms |
+| 8 streams: tok/s | 135.8 (r6p's gate) | 140.3 (±0.2%) |
+| greedy text: GPU wait for table 0 (dgx1) | 1,583 ms | 15.8 ms |
+| 1 stream | no slow reads | no slow reads |
+
+The drive's sleep costs about 3% of eight-stream throughput on TP3. A single stream's
+steps are shorter than 100 ms, so it is unaffected. `doctor --live` now warns when a
+drive sleeps before 1 s idle, or enters a 20 ms state before 30 s, and gives the
+timeouts that avoid both (2 s and 60 s, [setup](../../docs/setup.md#nvme-power-states-apst)).

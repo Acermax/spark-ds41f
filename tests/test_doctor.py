@@ -215,6 +215,36 @@ class NvmeCoalescingTest(unittest.TestCase):
         self.assertIn("cannot read", warnings[0])
 
 
+class NvmeApstTest(unittest.TestCase):
+    EXITS = "0:1000 1:1000 2:1000 3:11000 4:46000"
+
+    def apst(self, enabled: str, chain: str) -> dict[str, str]:
+        return facts(nvme_apst=f"nvme0|en={enabled}|{chain}|{self.EXITS}")
+
+    def test_kernel_defaults_are_reported_with_the_fix(self) -> None:
+        # The fleet's drives under the kernel's apst_primary_timeout_ms=100.
+        warnings = spark.nvme_apst_warnings(
+            "dgx1", self.apst("1", "0>3@100 1>3@100 2>3@100 3>4@2000 "))
+        self.assertEqual(len(warnings), 2)
+        self.assertIn("PS3 (11 ms to wake) after 100 ms idle", warnings[0])
+        self.assertIn("PS4 (46 ms to wake) after 2100 ms idle", warnings[1])
+        self.assertIn("apst_primary_timeout_ms=2000", warnings[0])
+        self.assertTrue(all(isinstance(w, spark.Warn) for w in warnings))
+
+    def test_tuned_timeouts_pass(self) -> None:
+        self.assertEqual(spark.nvme_apst_warnings(
+            "dgx1", self.apst("1", "0>3@2000 1>3@2000 2>3@2000 3>4@60000 ")), [])
+
+    def test_disabled_apst_and_missing_facts_pass(self) -> None:
+        self.assertEqual(spark.nvme_apst_warnings("dgx1", self.apst("0", "")), [])
+        self.assertEqual(spark.nvme_apst_warnings("dgx1", facts()), [])
+
+    def test_unreadable_controller_is_reported(self) -> None:
+        warnings = spark.nvme_apst_warnings("dgx4", facts(nvme_apst="nvme0|en=||"))
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("cannot read NVMe APST", warnings[0])
+
+
 class IdleServicesTest(unittest.TestCase):
     def test_idle_services_are_reported_with_their_fix(self) -> None:
         problems = spark.idle_service_warnings(

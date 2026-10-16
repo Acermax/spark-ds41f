@@ -53,6 +53,7 @@ Each node needs:
 | [Kernel mode setting](#kernel-mode-setting) (`nvidia-drm modeset=Y`) | required | required | `doctor --live` | reinstall `nvidia-drm-options-modeset0` |
 | [`vm.watermark_boost_factor=0`](#memory-accounting) | recommended | recommended | — | delete the sysctl file |
 | [NVMe interrupt coalescing off](#nvme-interrupt-coalescing) | optional | optional | `doctor --live` (warn) | unmask the service |
+| [NVMe sleeps only when idle](#nvme-power-states-apst) (APST timeouts 2 s / 60 s) | recommended | recommended | `doctor --live` (warn) | delete the modprobe file |
 | [UEFI boot order](#boot-order) | optional | optional | `doctor --live` (warn) | `efibootmgr --bootorder` |
 | [Fan-floor control](#fan-floor-control) | recommended | recommended | `doctor --live` (error until installed) | its [uninstall guide](https://github.com/christopherowen/dgx-spark-fan-control/blob/main/docs/maintenance.md#uninstall) |
 | [64 KiB kernel, swap and memory policy](#2-kernel-64-kib-profiles) | — | required | `doctor --live`, launch | [boot the 4 KiB kernel](#revert-the-64-kib-kernel) |
@@ -183,6 +184,33 @@ sudo /usr/bin/nvidia-nvme-interrupt-coalescing.sh disable
 ```
 
 Revert: `sudo systemctl unmask nvidia-nvme-interrupt-coalescing.service` and
+reboot.
+
+### NVMe power states (APST)
+
+With the kernel's defaults the drive enters a sleep state 100 ms after its last
+I/O (PS3, 11 ms to wake) and a deeper one 2 s later (PS4, 46 ms). Engram reads
+its tables from the drive on the decode critical path, so the first read after a
+pause waits for the drive to wake. On TP3 at eight streams the steps are longer
+than 100 ms: the GPU waited 1.5 s for Engram rows in a 62 s run, and throughput
+was 3% higher with the drive kept awake
+([measurement](../experiments/2026-10-16-r6p/README.md)). Longer timeouts keep
+the drive awake while serving and let it sleep when idle:
+
+```sh
+echo 2000 | sudo tee /sys/module/nvme_core/parameters/apst_primary_timeout_ms
+echo 60000 | sudo tee /sys/module/nvme_core/parameters/apst_secondary_timeout_ms
+for c in /sys/class/nvme/nvme*; do  # re-arm APST with the new timeouts
+  t=$(cat "$c/power/pm_qos_latency_tolerance_us")
+  echo $((t - 1)) | sudo tee "$c/power/pm_qos_latency_tolerance_us" >/dev/null
+  echo "$t" | sudo tee "$c/power/pm_qos_latency_tolerance_us" >/dev/null
+done
+echo 'options nvme_core apst_primary_timeout_ms=2000 apst_secondary_timeout_ms=60000' \
+  | sudo tee /etc/modprobe.d/nvme-apst.conf
+sudo update-initramfs -u   # nvme_core loads from the initramfs
+```
+
+Revert: delete `/etc/modprobe.d/nvme-apst.conf`, `sudo update-initramfs -u` and
 reboot.
 
 ### Boot order
