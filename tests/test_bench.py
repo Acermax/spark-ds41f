@@ -668,10 +668,11 @@ class ReferenceShapeTest(unittest.TestCase):
     def test_tp4_profile_compares_with_the_tp4_run(self) -> None:
         cluster, nodes = self.profile("config/cluster.json", "tp4-ring")
         self.assertEqual(cluster["benchmark_reference"], self.TP4_REFERENCE)
-        # The reference is a suite run: the old bench compares only with an explicit report.
+        # The reference is a suite run: the old bench runs without a comparison (setup's verify step).
         status, output = self.bench("config/cluster.json", cluster, nodes, "--report", self.report(cluster, nodes))
-        self.assertEqual(status, 1)
-        self.assertIn("is a servebench suite run; compare with it through bench --suite", output)
+        self.assertEqual(status, 0)
+        self.assertIn("is a servebench suite run; this bench compares with nothing", output)
+        self.assertNotIn("reference:", output)
         status, output = self.bench("config/cluster.json", cluster, nodes, "--report", self.report(cluster, nodes),
                                     "--compare", self.TP4_BENCH)
         self.assertEqual(status, 0)
