@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "generated_from_baseline": "2026-10-13-karmic-kraken-r6k",
+ "generated_from_baseline": "2026-10-15-karmic-kraken-r6n",
  "sources": {
   "vllm": {
    "kind": "git",

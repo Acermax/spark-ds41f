@@ -295,7 +295,9 @@ class ProductionProfileTest(unittest.TestCase):
     def test_dry_run_shows_the_profile_for_every_cluster_action(self) -> None:
         spec = self.state / "spec.json"
         spec.write_text(json.dumps(SPEC))
-        code, out = self.main("run", str(spec), "--dry-run", "--production-config", TP4)
+        # SPEC's arms predate the current locks; their own checks are not this test's subject.
+        with mock.patch.object(lab, "arm_problems", return_value=[]):
+            code, out = self.main("run", str(spec), "--dry-run", "--production-config", TP4)
         self.assertEqual(code, 0)
         self.assertIn("steps; production experiments/2026-10-14-one-recipe/tp4-r6k-production.json", out.splitlines()[0])
         self.assertIn("bin/spark --cluster-config experiments/2026-10-14-one-recipe/tp4-r6k-production.json cluster stop --apply --parallel", out)
@@ -401,7 +403,8 @@ class ProfilePlanTest(unittest.TestCase):
 class QueueTest(unittest.TestCase):
     def test_add_validates_and_orders_specs(self) -> None:
         with tempfile.TemporaryDirectory() as directory, \
-                mock.patch.object(lab, "QUEUE", Path(directory) / "queue"):
+                mock.patch.object(lab, "QUEUE", Path(directory) / "queue"), \
+                mock.patch.object(lab, "arm_problems", return_value=[]):
             good = Path(directory) / "a.json"
             good.write_text(json.dumps(SPEC))
             with contextlib.redirect_stdout(io.StringIO()) as log:
@@ -430,6 +433,21 @@ class QueueTest(unittest.TestCase):
 
 class PlanProblemsTest(unittest.TestCase):
     """Mistakes that would cost a boot are found from the spec alone."""
+
+    def test_an_arm_cluster_start_would_refuse_is_named(self) -> None:
+        # r6o's first gate stopped at its boot: its lock still named r6n's own baseline.
+        arm = "experiments/2026-10-16-r6o/r6o-tp3.json"
+        real = lab.spark.configuration
+
+        def stale(args):
+            cluster, nodes, upstreams = real(args)
+            return cluster, nodes, dict(upstreams, generated_from_baseline="2026-10-13-karmic-kraken-r6k")
+
+        with mock.patch.object(lab.spark, "configuration", stale):
+            problems = lab.plan_problems([{"kind": "boot", "config": arm}])
+        self.assertIn(f"{arm}: cluster and upstream locks name different baselines", problems)
+        self.assertNotIn(f"{arm}: cluster and upstream locks name different baselines",
+                         lab.plan_problems([{"kind": "boot", "config": arm}]))
 
     def measure(self, extras: list) -> dict:
         return {"experiment": "experiments/2026-10-14-servebench", "run": "r", "jobs": [

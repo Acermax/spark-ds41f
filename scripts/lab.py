@@ -950,8 +950,11 @@ def plan_problems(steps: list[dict]) -> list[str]:
     servebench arguments its parser rejects."""
     problems = []
     for step in steps:
-        if step["kind"] == "boot" and not (ROOT / step["config"]).is_file():
-            problems.append(f"arm configuration {step['config']} does not exist")
+        if step["kind"] == "boot":
+            if not (ROOT / step["config"]).is_file():
+                problems.append(f"arm configuration {step['config']} does not exist")
+            else:
+                problems.extend(f"{step['config']}: {problem}" for problem in arm_problems(step["config"]))
         if step["kind"] == "cli" and step.get("suite"):
             problems.extend(suite_problems(step))
         if step["kind"] not in ("script", "profile"):
@@ -976,6 +979,14 @@ def plan_problems(steps: list[dict]) -> list[str]:
             except (ValueError, OSError) as error:
                 problems.append(f"{script} {shlex.join(args[1:])}: {error}")
     return list(dict.fromkeys(problems))
+
+
+def arm_problems(config: str) -> list[str]:
+    """The checks cluster start --apply makes on the arm before it touches a node (its
+    locks, kernel backend, topology and benchmark reference), so a refusal shows before
+    the window stops serving."""
+    cluster, nodes, upstreams = spark.configuration(argparse.Namespace(cluster_config=config))
+    return spark.local_doctor(cluster, nodes, upstreams)
 
 
 def suite_problems(step: dict) -> list[str]:
