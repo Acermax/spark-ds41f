@@ -1,7 +1,7 @@
-From c51100abdb07cd3944cb9c46549a77da5b7dc8e0 Mon Sep 17 00:00:00 2001
+From e8c79d825a54e0e88c54a8de1b948d013e36b88c Mon Sep 17 00:00:00 2001
 From: Christopher Owen <3221756+christopherowen@users.noreply.github.com>
 Date: Fri, 16 Oct 2026 11:40:48 +0200
-Subject: [PATCH 150/150] DeepSeek V4.1 prefill SP: Engram's wkv product
+Subject: [PATCH 150/151] DeepSeek V4.1 prefill SP: Engram's wkv product
  exchanged all-to-all
 
 Under prefill sequence parallelism every rank projected all T rows of an
@@ -12,16 +12,18 @@ gathered output was sliced and copied in full.
 
 Each rank now sends every other rank that rank's rows of its column block
 (an equal-block all-to-all: PyNCCL grouped send/recv, a registered
-collective so compiled graphs see it) and lays the blocks it receives side
-by side in rank order, the column order the all-gather gave. It moves 1/N
-of the all-gather's bytes; the arithmetic is unchanged. Decode, which runs
-on full rows, keeps the all-gather.
+collective so compiled graphs see it) and copies the blocks it receives
+side by side in rank order, the column order the all-gather gave, into
+packed rows (the TileLang gate requires them). It moves 1/N of the
+all-gather's bytes; the arithmetic is unchanged. Decode, which runs on
+full rows, keeps the all-gather.
 
-Test: every rank's exchanged rows equal its rows of the gathered product,
-with the other ranks' blocks simulated (3 and 4 ranks, padded last rank).
+Test: every rank's exchanged rows are packed and equal its rows of the
+gathered product, with the other ranks' blocks simulated (3 and 4 ranks,
+padded last rank, a wholly padded last block).
 
 diff --git a/tests/models/test_deepseek_v41_sp_project_reduce_scatter.py b/tests/models/test_deepseek_v41_sp_project_reduce_scatter.py
-index 21e0fbac5..f204dc78e 100644
+index 21e0fbac5..38ba5b7cc 100644
 --- a/tests/models/test_deepseek_v41_sp_project_reduce_scatter.py
 +++ b/tests/models/test_deepseek_v41_sp_project_reduce_scatter.py
 @@ -119,3 +119,39 @@ def test_unreduced_parts_hold_every_block(monkeypatch, tokens, rank, slices, per
@@ -58,7 +60,7 @@ index 21e0fbac5..f204dc78e 100644
 +        monkeypatch.setattr(sp_prefill, "tensor_model_parallel_all_to_all", all_to_all)
 +        local = product[:, r * block : (r + 1) * block]
 +        result = rows.exchange_columns(local, width)
-+        assert result.shape == (own, width)
++        assert result.shape == (own, width) and result.is_contiguous()
 +        real = rows.real_rows
 +        assert torch.equal(
 +            result[:real], product[rows.start : rows.start + real, :width]
@@ -247,7 +249,7 @@ index 6bca6613d..63928aba0 100644
                  token_mask = token_mask[start : start + real]
          if kernels.uses_tilelang():
 diff --git a/vllm/models/deepseek_v4_1/sp_prefill.py b/vllm/models/deepseek_v4_1/sp_prefill.py
-index c1e794bbe..e0ac345cc 100644
+index c1e794bbe..886ff36cf 100644
 --- a/vllm/models/deepseek_v4_1/sp_prefill.py
 +++ b/vllm/models/deepseek_v4_1/sp_prefill.py
 @@ -45,7 +45,8 @@ row and then compacts.
@@ -268,7 +270,7 @@ index c1e794bbe..e0ac345cc 100644
      tensor_model_parallel_reduce_scatter,
  )
  from vllm.logger import init_logger
-@@ -196,6 +198,22 @@ class SPRows:
+@@ -196,6 +198,31 @@ class SPRows:
              )
          return tensor_model_parallel_reduce_scatter(padded, dim=0)
  
@@ -284,9 +286,18 @@ index c1e794bbe..e0ac345cc 100644
 +            )
 +        padded = self.empty_padded(local.shape[1:], local.dtype, local.device)
 +        padded[: self.num_tokens].copy_(local)
-+        blocks = tensor_model_parallel_all_to_all(padded)
-+        rows = blocks.view(self.world_size, self.local_rows, *local.shape[1:])
-+        return rows.transpose(0, 1).reshape(self.local_rows, -1)[:, :width]
++        blocks = tensor_model_parallel_all_to_all(padded).view(
++            self.world_size, self.local_rows, -1
++        )
++        # One copy into packed rows (consumers such as the TileLang gate require them);
++        # a block wholly past ``width`` is padding and is dropped.
++        block = blocks.shape[-1]
++        parts = [
++            blocks[rank, :, : width - rank * block]
++            for rank in range(self.world_size)
++            if rank * block < width
++        ]
++        return torch.cat(parts, dim=1)
 +
      def empty_padded(
          self, row_shape: tuple[int, ...], dtype: torch.dtype, device: torch.device

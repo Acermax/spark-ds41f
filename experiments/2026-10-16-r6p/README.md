@@ -23,7 +23,10 @@ r6p is r6o ([experiments/2026-10-16-r6o](../2026-10-16-r6o/README.md)) with:
    began reading on 2026-10-10 and 2026-10-11. Thirteen tests had failed with
    `AttributeError` since then.
 
-Source: vLLM tree `4c53bdf5` (patch head `dbfa162e`).
+3. **0151, a debug timeline** of each step's Engram rows (`SPARK3_ENGRAM_TIMELINE=1`, off and
+   free in serving). See below.
+
+Source: vLLM tree `3b2492eb` (patch head `a0519bf5`).
 
 ## Tests (dgx4, r6n's image with the changed files mounted)
 
@@ -46,3 +49,24 @@ Source: vLLM tree `4c53bdf5` (patch head `dbfa162e`).
 4. [release.json](release.json): the release-tp3 suite on r6p, r6n and r6p again. This
    is the release comparison for the whole Engram change set. The owner decides
    promotion.
+
+## The first build (2026-10-16)
+
+The first image (tree `4c53bdf5`) failed its gate boot. The TileLang `engram_gate`
+kernel requires packed `kv` rows, and the exchange returned a strided view of the
+blocks laid side by side. The B12X gate used by the unit tests accepts strided rows,
+so the tests did not see it. The exchange now copies the received blocks into packed
+rows, the same single copy, and the test checks that the rows are packed. Reading the
+all-to-all's blocks in place in the gate, and sending the last rank's real rows only,
+would remove the remaining two copies of about 69 MB per call, roughly 10 ms of a TP3
+16K prefill. That is a follow-up.
+
+## Decode wait timeline
+
+In r6o's and r6n's profiled eight-stream windows, table 0's wait was 7-8 ms in about
+half the steps (median 3 us). The hash runs 3 ms ahead of the wait, so the reader
+published about 10 ms after the GPU's IDs, for a few hundred lookups a rank.
+[timeline.json](timeline.json) boots r6p with the debug timeline and runs 8 and 1
+distinct streams and the long-line greedy text, without the profiler. Each record
+splits a step into queueing, waiting for the GPU's IDs, reading and publishing, next
+to the GPU's wait for it.
