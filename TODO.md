@@ -50,8 +50,9 @@ they join a candidate only within 1% of r6n with its bits. TP3 runs r6n since
 4. One host channel: move the Engram control block's wait and publish helpers and
    the native worker into sparknet, then put DSpark's confidences on it with
    sparknet's broadcast.
-5. Credit huxiaofengtiger with a `Reported-by:` trailer on vLLM 0143 at the next
-   image rebuild (r6n's README credits the forum report already).
+5. Credit huxiaofengtiger with a `Reported-by:` trailer on vLLM 0143: carried by r6o's
+   series ([experiments/2026-10-16-r6o](experiments/2026-10-16-r6o/README.md)); done when
+   r6o or its successor is promoted.
 6. **Unpin TP4's cost curves at its next release.** Since 2026-10-15 a profile without a
    pinned directory schedules on its own build's curves (`bin/spark` derives
    `SPARK3_DSPARK_COST_DIR` per build). `tp4-ring` still pins r6h's
@@ -69,15 +70,15 @@ they join a candidate only within 1% of r6n with its bits. TP3 runs r6n since
 Decode and prefill differ in when the row IDs exist and in what bounds the cost, not in
 the code they need, so these are behaviours of the one path, chosen by the step, not
 settings. Bound each from a measurement before building it:
-1. **Measure first.** A debug-only counter (off and free in production) of how long
-   the GPU waits for each table's rows, per step, split into prefill chunks and decode
-   steps, on real text and on the production agent workload. The 2026-10-07
-   measurement put decode's stall at 0.7-1% of a step; prefill's is unmeasured.
-2. **Prefill read-ahead.** A prompt's tokens are known before its chunks run: hash the
-   next chunk's rows on the host and read them while the current chunk computes, so
-   the first Engram layer never waits (antirez's ds4 pipelines its prefill reads this
-   way). Decode cannot: under asynchronous scheduling its row IDs exist only on the
-   GPU when the step starts. Build it if (1) shows prefill's first-table wait matters.
+1. **Measure first.** Decode's stall was 0.7-1% of a step (2026-10-07). Prefill's: the
+   first table waits 53 / 86 / 119 ms per 16K prefill on TP3's three ranks, the second
+   never ([experiments/2026-10-16-tp3-prefill](experiments/2026-10-16-tp3-prefill/README.md)).
+   Still open: the same split on the production agent workload.
+2. **Prefill read-ahead: built as the step-aware reader** (vLLM 0148, r6o). The runner
+   hashes a step's prompt rows on the host a step ahead and the reader reads them once
+   the GPU has gathered the previous step; rows of sampled tokens still come from the
+   GPU's hash, in the same step. Qualify and release it on TP3, then TP4
+   ([experiments/2026-10-16-r6o](experiments/2026-10-16-r6o/README.md)).
 3. **Decode hot rows.** Decode is latency-bound and keeps hitting common n-grams,
    while O_DIRECT reads every row from the SSD every step. Compare the page cache
    (buffered reads, as ds4 does) or a small hot-row cache against today's reads, by
