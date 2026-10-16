@@ -8,7 +8,9 @@
   {
    "kind": "profile",
    "workloads": [
-    "prefill"
+    "prefill",
+    "decode",
+    "c8"
    ],
    "arms": [
     {

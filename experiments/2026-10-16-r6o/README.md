@@ -103,8 +103,11 @@ fails the test instead of hanging the suite.
    it from main with `bin/spark --cluster-config experiments/2026-10-16-r6o/r6o-tp3.json
    build prepare` and `build image --apply`, then copied to dgx1-3.
 2. [gate.json](gate.json): the check boot, then the plain build.
-3. [profile.json](profile.json): the torch-profiled 16K prefill on r6o, r6n and r6o
-   again. Table 0's wait kernel should fall from 53-119 ms per prefill to near zero.
+3. [profile.json](profile.json): torch-profiled r6o, r6n and r6o again on a 16K prefill,
+   a single-stream decode and an eight-stream decode window. Table 0's wait kernel
+   should fall from 53-119 ms per prefill to near zero; decode should be level (its
+   rows come from the GPU's hash as before), and the profiles show what Engram still
+   costs in each.
 4. [release.json](release.json): the release-tp3 suite on r6o, r6n and r6o again. The
    owner decides promotion.
 5. TP4 at the next re-cable: the same gate and the release suite against r6n.
