@@ -34,14 +34,14 @@ changes on top of its series:
    same row on both sides. The host refuses a step where a verifying request follows a
    prefill chunk. `SPARK3_ENGRAM_CHECK_EARLY_IDS=1` (debug, off in serving) compares
    every early ID with the GPU's and names the first difference.
-2. **0147, pinned checkpoint copies.** This fixes the Engram model test that spun in a
-   host-to-device copy during r6n's qualification (below).
+2. **0147, checkpoint copies through anonymous memory.** This fixes the Engram model
+   test that spun in a host-to-device copy during r6n's qualification (below).
 3. **0146, the Engram model test.** It compares the readers' counters once they are
    idle. This change was in r6n's test bundle but not in its series.
 4. **0143's credit.** huxiaofengtiger's forum report of r6h's TP3 startup failures is
    credited with a `Reported-by:` trailer.
 
-Source: vLLM tree `799c7fac` (patch head `38cc5972`, as the build replays it). sparknet,
+Source: vLLM tree `cfea587b` (patch head `a58660ee`, as the build replays it). sparknet,
 B12X, NCCL, TileLang and TileKernels are as in r6n.
 
 ## The copy that never finished
@@ -68,12 +68,18 @@ Dirty or written-back pages make no difference, and neither does a shared or pri
 mapping.
 
 safetensors' `get_tensor` returns a view into the mmapped file at the tensor's offset.
-The test's 3.9 MB weight met every condition. `copy_weight`'s plain copy now pins a
-pageable CPU source first: the CPU reads the file, and the transfer is a DMA from
-pinned memory. Every safetensors-style reader goes through `copy_weight`. Production's
-`--load-format b12x` installs a weight writer and never reaches this code. A new test
-copies from an untouched mapping at offset 1504 in a child process, so a regression
-fails the test instead of hanging the suite.
+The test's 3.9 MB weight met every condition. `copy_weight`'s plain copy now copies a
+pageable CPU source into anonymous memory first, so the CPU reads the file. Every
+safetensors-style reader goes through `copy_weight`. A new test copies from an
+untouched mapping at offset 1504 in a child process, so a regression fails the test
+instead of hanging the suite. It also checks that no pinned memory remains.
+
+The first build pinned the source instead (`pin_memory()`), and its gate boot failed.
+The startup memory guard stopped dgx1 at 4.72 GiB available during the drafter's graph
+capture, below its 5 GiB floor. Torch's host allocator keeps every pinned block,
+rounded up to a power of two, for the life of the process, and on GB10 that memory is
+the GPU's. Production's `--load-format b12x` writer does not take every weight: the
+ones it declines reach this path. The anonymous copy is freed when the copy returns.
 
 ## Quality and safety gates
 

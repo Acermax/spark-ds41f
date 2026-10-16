@@ -1,7 +1,7 @@
 # r6o: r6n's series (experiments/2026-10-15-r6n) with the reporter of r6h's TP3 startup
 # failures credited in 0143, 0146 the Engram model test's settled reader counters, 0147
-# pinned checkpoint copies (R580 on the 64 KiB kernel hangs in a pageable copy from
-# untouched mmap pages) and 0148 the step-aware Engram reader (early host-hashed rows).
+# checkpoint copies through anonymous memory (R580 on the 64 KiB kernel hangs in a
+# pageable copy from untouched mmap pages) and 0148 the step-aware Engram reader (early host-hashed rows).
 # r6l: r6k's series (experiments/2026-10-13-r6k) and vLLM branch r6l (kernel-contracts):
 # 0134 the non-finite contracts, 0135 DeepSeek-derived compression and Engram hash
 # oracles, 0136 the calibrated MoE check, 0137 the shared SwiGLU clamps and 0138 the

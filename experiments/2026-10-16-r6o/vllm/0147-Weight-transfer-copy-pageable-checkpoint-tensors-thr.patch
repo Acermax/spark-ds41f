@@ -1,8 +1,8 @@
-From 7ca37fad3736b950b41215f5b37228da3c677119 Mon Sep 17 00:00:00 2001
+From b91b32f79c0456a23a7700a1b9c24d077bb65eda Mon Sep 17 00:00:00 2001
 From: Christopher Owen <3221756+christopherowen@users.noreply.github.com>
 Date: Fri, 16 Oct 2026 10:32:02 +0200
 Subject: [PATCH 147/148] Weight transfer: copy pageable checkpoint tensors
- through pinned memory
+ through anonymous memory
 
 A checkpoint tensor is often a view of a memory-mapped file: safetensors'
 get_tensor returns one at the tensor's offset in the file. On GB10 the
@@ -15,16 +15,20 @@ logged. Anonymous memory, pages already read, a page-aligned start and
 copies up to 128 KiB all complete. The Engram descriptor-loading test hit
 it on its first 3.9 MB weight.
 
-copy_weight's plain copy now pins a pageable CPU source first, so the CPU
-reads the file and the transfer is a DMA from pinned memory. Loads through
-a weight writer (the b12x loader) are unchanged. The new test copies from
-an untouched mapping at offset 1504 in a child process with a timeout.
+copy_weight's plain copy now copies a pageable CPU source into anonymous
+memory first, so the CPU reads the file. Not pin_memory: Torch's host
+allocator keeps every pinned block, rounded up to a power of two, for the
+life of the process, and on GB10 that memory is the GPU's (a pinned
+version left dgx1 below the 5 GiB startup memory guard). Loads through a
+weight writer (the b12x loader) are unchanged. The new test copies from
+an untouched mapping at offset 1504 in a child process with a timeout and
+checks that no pinned memory remains.
 
 diff --git a/tests/model_executor/model_loader/test_weight_transfer.py b/tests/model_executor/model_loader/test_weight_transfer.py
-index d6f593b5a..5ab749f22 100644
+index d6f593b5a..9463306e3 100644
 --- a/tests/model_executor/model_loader/test_weight_transfer.py
 +++ b/tests/model_executor/model_loader/test_weight_transfer.py
-@@ -104,3 +104,42 @@ def test_explicit_completion_preserves_rank_local_flush_boundaries():
+@@ -104,3 +104,46 @@ def test_explicit_completion_preserves_rank_local_flush_boundaries():
      assert calls == ["flush", "finish"]
      finish_weight_transfers()
      assert calls == ["flush", "finish"]
@@ -43,8 +47,11 @@ index d6f593b5a..5ab749f22 100644
 +# safetensors tensor is.
 +source = torch.frombuffer(mapping, dtype=torch.uint8)[offset : offset + nbytes]
 +destination = torch.empty(nbytes, dtype=torch.uint8, device="cuda")
++pinned = torch.cuda.host_memory_stats().get("allocated_bytes.current", 0)
 +copy_weight(destination, source)
 +torch.cuda.synchronize()
++# Nothing stays pinned: Torch's host allocator would keep it for the process's life.
++assert torch.cuda.host_memory_stats().get("allocated_bytes.current", 0) == pinned
 +with open(path, "rb") as file:
 +    expected = file.read()[offset : offset + nbytes]
 +assert destination.cpu().numpy().tobytes() == expected
@@ -54,9 +61,10 @@ index d6f593b5a..5ab749f22 100644
 +@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
 +def test_copy_from_an_untouched_file_mapping_completes(tmp_path):
 +    """A checkpoint tensor that views memory-mapped file pages the process has not
-+    touched, starting off a page boundary, reaches the device. (A pageable copy of it
-+    never completes with driver R580 on a 64 KiB-page GB10 kernel.) The copy runs in a
-+    child process so a hang fails the test instead of the suite."""
++    touched, starting off a page boundary, reaches the device, and leaves no pinned
++    memory behind. (A pageable copy of it never completes with driver R580 on a 64 KiB-
++    page GB10 kernel.) The copy runs in a child process so a hang fails the test
++    instead of the suite."""
 +    import subprocess
 +    import sys
 +
@@ -68,10 +76,10 @@ index d6f593b5a..5ab749f22 100644
 +    )
 +    assert result.returncode == 0, result.stderr[-2000:]
 diff --git a/vllm/model_executor/weight_transfer.py b/vllm/model_executor/weight_transfer.py
-index 25be5b1ed..81cf2eaa6 100644
+index 25be5b1ed..d1676f33f 100644
 --- a/vllm/model_executor/weight_transfer.py
 +++ b/vllm/model_executor/weight_transfer.py
-@@ -48,6 +48,18 @@ def weight_transfer(
+@@ -48,6 +48,20 @@ def weight_transfer(
  def copy_weight(destination: torch.Tensor, source: torch.Tensor) -> torch.Tensor:
      writer = _writer.get()
      if destination.is_meta or writer is None or not writer(destination, source):
@@ -85,8 +93,10 @@ index 25be5b1ed..81cf2eaa6 100644
 +            # host page tables, and with driver R580 on a 64 KiB-page kernel it never
 +            # completes when the file pages are not yet mapped and the copy does not
 +            # start on a page boundary (the host spins in the copy, the GPU is idle).
-+            # A pinned copy reads the file on the CPU and transfers by DMA.
-+            source = source.pin_memory()
++            # A copy into anonymous memory reads the file on the CPU first. (Not
++            # pin_memory: Torch's host allocator keeps every pinned block, rounded up
++            # to a power of two, and on GB10 that memory is the GPU's.)
++            source = source.clone()
          destination.copy_(source)
      return destination
  
