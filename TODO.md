@@ -41,6 +41,31 @@ ReLU and the index quantizer's NaN handling stay in the kernel contracts' rounds
 (round 6: the BF16 clamp is on the 1% line at 8K x 2048, the quantizer 1-3% slower);
 they join a candidate only within 1% of r6n with its bits.
 
+**For the release notes: an outside comparison with SGLang.** Credit koldfrontier's site
+and link its receipt ([experiments/2026-10-17-site-tp4-4k-1017](experiments/2026-10-17-site-tp4-4k-1017/README.md), PR #346).
+The site measured this on its own four-Spark ring on 2026-10-17. The setup:
+- `tp4-ring` on a stock 4 KiB kernel without the memory saver;
+- the r6u image plus vLLM 0180, which is r6v's code on the ring;
+- MiaAI-Lab's SGLang production line (cad252b, TP4/EP1, 716,800 context, DSpark 5);
+- the same 1017 weights, client battery and day for both engines.
+
+| Measure (the site's battery) | SGLang | spark-ds41f (two runs, one boot) |
+|---|---:|---:|
+| idle decode step, counting / code | 43.4-44.4 / 46.1-46.9 ms | 36.7-37.1 / 38.7-39.1 ms |
+| aggregate decode tok/s, C1 / C4 / C8 / C16 | 70.2 / 188.1 / 285.3 / 445.1 | 87.3-87.5 / 219.6-219.9 / 329.7-330.4 / 463.4-465.2 |
+| salted cold prefill tok/s, ~3.5K / 13K / 54K / 109K | 3,042 / 4,806 / 4,326 / 3,925 | 4,458 / 5,744 / 6,231 / 6,148 |
+| salted needle, ~545K tokens | pass, 2,444 tok/s | pass, 5,225-5,239 tok/s |
+| salted needle, 992,974 tokens | over its 716,800 limit | pass, 4,413 tok/s (225 s) |
+| qeval, 75 tasks, greedy / vision + tools | 72 / 7 of 7 | 71 / 7 of 7 |
+
+Quote the losses and limits with the numbers:
+- **Losses:** one reproducible extra qeval miss (`json_count`), and coding, math and
+  format 1-7% behind at C16.
+- **Limits:** one boot per engine on the site's own battery, not `bin/spark bench` or our
+  release suite, with no intervals and no soak or agent workload. Ranges span the two
+  spark-ds41f runs; prefill and the 993K needle come from run 2 only.
+- **Not our measurement:** our own numbers come from the release's baseline.
+
 **After r6n:**
 1. Drop `disk_resident_scales` from the recipe's serve arguments, then the field
    (vLLM 0145 accepts it only as false, so the r6k recipe stays valid under

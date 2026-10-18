@@ -1,0 +1,9 @@
+{
+  "intended_variable": "host page-size profile: the fleet's 4 KiB kernel 7.0.0-1019-nvidia with stock UVM and no memory saver (tp3-triangle-4k's host), tp4-ring otherwise as the recipe",
+  "configuration_delta": {
+    "arm": "candidate-arm.json",
+    "host.kernel": {"release": "7.0.0-1019-nvidia", "page_size": 4096, "memory_saver_required": false}
+  },
+  "source_delta": [],
+  "image_digest": "the recipe's image at run time (r6v today: vllm-ds41f-kkref:19f2c20ed4d6-r6v, sha256:8eb7fd815742a2fbb7eab79111f38781b7e775be51bd2084993a736d4376a568), unchanged"
+}

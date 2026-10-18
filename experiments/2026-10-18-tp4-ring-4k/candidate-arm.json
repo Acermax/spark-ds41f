@@ -1,0 +1,16 @@
+{
+  "notes": "Proposed, not run: the recipe at tp4-ring on the fleet's 4 KiB kernel (7.0.0-1019-nvidia, stock UVM, no memory saver), as tp3-triangle-4k declares its host; sizing, model, guards and cabling are the recipe's.",
+  "extends": {
+    "config": "config/cluster.json",
+    "shape": "tp4-ring"
+  },
+  "set": {
+    "host": {
+      "kernel": {
+        "release": "7.0.0-1019-nvidia",
+        "page_size": 4096,
+        "memory_saver_required": false
+      }
+    }
+  }
+}
