@@ -33,13 +33,9 @@ before tuning anything on this basis.
 
 ## Next release
 
-**r6s** shipped for TP3 on 2026-10-16
-([experiments/2026-10-16-r6s](experiments/2026-10-16-r6s/README.md)); TP4 stays on
-**r6n** (2026-10-15, [experiments/2026-10-15-r6n](experiments/2026-10-15-r6n/README.md))
-until r6s is released on the ring. The indexer
-ReLU and the index quantizer's NaN handling stay in the kernel contracts' rounds
-(round 6: the BF16 clamp is on the 1% line at 8K x 2048, the quantizer 1-3% slower);
-they join a candidate only within 1% of r6n with its bits.
+The indexer ReLU and the index quantizer's NaN handling stay in the kernel contracts'
+rounds (round 6: the BF16 clamp is on the 1% line at 8K x 2048, the quantizer 1-3%
+slower); they join a candidate only within 1% of the promoted release with its bits.
 
 **For the release notes: an outside comparison with SGLang.** Credit koldfrontier's site
 and link its receipt ([experiments/2026-10-17-site-tp4-4k-1017](experiments/2026-10-17-site-tp4-4k-1017/README.md), PR #346).
@@ -66,7 +62,7 @@ Quote the losses and limits with the numbers:
   spark-ds41f runs; prefill and the 993K needle come from run 2 only.
 - **Not our measurement:** our own numbers come from the release's baseline.
 
-**After r6n:**
+**Open items:**
 1. Drop `disk_resident_scales` from the recipe's serve arguments, then the field
    (vLLM 0145 accepts it only as false, so the r6k recipe stays valid under
    `doctor --live`).
@@ -76,22 +72,14 @@ Quote the losses and limits with the numbers:
 4. One host channel: move the Engram control block's wait and publish helpers and
    the native worker into sparknet, then put DSpark's confidences on it with
    sparknet's broadcast.
-5. ~~Credit huxiaofengtiger with a `Reported-by:` trailer on vLLM 0143~~: carried by r6o's
-   series ([experiments/2026-10-16-r6o](experiments/2026-10-16-r6o/README.md)) into r6s,
-   promoted for TP3 on 2026-10-16; TP4 carries it from its r6s release.
-6. **Unpin TP4's cost curves at its next release.** Since 2026-10-15 a profile without a
-   pinned directory schedules on its own build's curves (`bin/spark` derives
-   `SPARK3_DSPARK_COST_DIR` per build). `tp4-ring` still pins r6h's
-   (`ring4-r6h-headout-20261012`), as r6n's TP4 release ran; drop the pin with the next
-   TP4 release so its candidate profiles its own.
-7. **Retire the old bench's measurements.** servebench suites decide releases and are the
+5. **Retire the old bench's measurements.** servebench suites decide releases and are the
    benchmark reference (2026-10-15). Remove `bin/spark bench`'s own suites (single-prompt
    decode points that move with the text, burst distinct streams, the quality gate's
    prompts) and the lab's `release` bench profile once nothing in a current job uses them.
-8. Merge sparknet `timeout-stop` (on `tilelang-only`) into sparknet's main and tag it:
+6. Merge sparknet `timeout-stop` (on `tilelang-only`) into sparknet's main and tag it:
    production now runs it from the branch.
 
-**Engram after r6n** (from the 2026-10-15 step back,
+**Engram** (from the 2026-10-15 step back,
 [experiments/2026-10-15-engram-rows-v2](experiments/2026-10-15-engram-rows-v2/README.md)).
 Decode and prefill differ in when the row IDs exist and in what bounds the cost, not in
 the code they need, so these are behaviours of the one path, chosen by the step, not
