@@ -1,4 +1,4 @@
-From 3e5e91c31d905e3dc71946e215dadf856e6cbaaf Mon Sep 17 00:00:00 2001
+From beb1b297224c5ab22385ddc516aa0c704e4d92f8 Mon Sep 17 00:00:00 2001
 From: Christopher Owen <3221756+christopherowen@users.noreply.github.com>
 Date: Mon, 19 Oct 2026 09:35:15 +0200
 Subject: [PATCH] CED skip: keep one decoder row of unread nonfinal chunks,
@@ -23,7 +23,7 @@ metadata or GPU work: no replay floor, environment switch or fallback.
  3 files changed, 323 insertions(+), 23 deletions(-)
 
 diff --git a/tests/v1/attention/test_b12x_v41_ced_metadata.py b/tests/v1/attention/test_b12x_v41_ced_metadata.py
-index e4705cf83..cae9bfc1e 100644
+index 50250e7dd..ce53191b2 100644
 --- a/tests/v1/attention/test_b12x_v41_ced_metadata.py
 +++ b/tests/v1/attention/test_b12x_v41_ced_metadata.py
 @@ -12,6 +12,7 @@ from vllm.models.deepseek_v4_1.ced import (
@@ -234,7 +234,7 @@ index e4705cf83..cae9bfc1e 100644
      state.disk_engram_models = ()
      state.device = torch.device("cuda")
 diff --git a/vllm/models/deepseek_v4_1/ced.py b/vllm/models/deepseek_v4_1/ced.py
-index 85e2c06c8..9dc2a2331 100644
+index 1a13f60c0..1cd89da7a 100644
 --- a/vllm/models/deepseek_v4_1/ced.py
 +++ b/vllm/models/deepseek_v4_1/ced.py
 @@ -17,6 +17,7 @@ if TYPE_CHECKING:
@@ -323,7 +323,7 @@ index 85e2c06c8..9dc2a2331 100644
  class CEDState:
      """Stable per-model staging buffers shared by dummy, capture, and runtime."""
  
-@@ -178,14 +230,20 @@ class CEDState:
+@@ -179,14 +231,20 @@ class CEDState:
          query_lengths,
          keep_full,
          prefix_start,
@@ -348,7 +348,7 @@ index 85e2c06c8..9dc2a2331 100644
              device="cpu",
              pin_memory=True,
 diff --git a/vllm/models/deepseek_v4_1/nvidia/model_state.py b/vllm/models/deepseek_v4_1/nvidia/model_state.py
-index 155b13ef0..382dd689e 100644
+index cbec44482..ea4c81d2a 100644
 --- a/vllm/models/deepseek_v4_1/nvidia/model_state.py
 +++ b/vllm/models/deepseek_v4_1/nvidia/model_state.py
 @@ -6,6 +6,7 @@ import numpy as np
@@ -436,9 +436,9 @@ index 155b13ef0..382dd689e 100644
 +                vllm_config, aligned_chunks=ALIGN_PREFILL_CHUNKS
 +            )
              hf = self.model_config.hf_config
-             self.ced_state.warmup(hf.hidden_size, hf.hc_mult)
              parallel = vllm_config.parallel_config
-@@ -197,19 +246,26 @@ class DeepseekV41ModelState(DefaultModelState):
+             self.ced_state.warmup(
+@@ -201,19 +250,26 @@ class DeepseekV41ModelState(DefaultModelState):
          # Fresh decoder pages lack cached history; streaming updates retain
          # the live request's private pages and therefore its original boundary.
          pending = self._ced_streaming_prefix_start
@@ -470,7 +470,7 @@ index 155b13ef0..382dd689e 100644
  
      def can_use_single_request_prefill_graph(self, num_reqs, num_tokens, req_ids):
          return (
-@@ -233,20 +289,57 @@ class DeepseekV41ModelState(DefaultModelState):
+@@ -237,20 +293,57 @@ class DeepseekV41ModelState(DefaultModelState):
          if state is None:
              return
          nr = input_batch.num_reqs

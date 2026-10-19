@@ -3,9 +3,10 @@
 Two arms on the production r6x image and recipe (TP3, 1M), each a runtime overlay of
 vLLM source with no test code:
 
-- `ports-tp3.json`: the TileLang CED requests, row map and row copy (vLLM e4d57b3fb,
-  experiments/2026-10-19-ced-kernels patches 0186-0209 without the sampling repair 0185).
-- `skip-tp3.json`: the ports plus the nonfinal row skip (vLLM 3e5e91c31,
+- `ports-tp3.json`: the TileLang CED requests, row map and row copy, and the CED state
+  that declares them (vLLM 1a15f6b6b, experiments/2026-10-19-ced-kernels patches
+  0186-0211 without the sampling repair 0185).
+- `skip-tp3.json`: the ports plus the nonfinal row skip (vLLM beb1b2972,
   experiments/2026-10-19-ced-skip).
 
 **`gate.json`, determinism.** `token_determinism_text.py` with and without logprobs at two

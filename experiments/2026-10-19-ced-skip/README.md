@@ -6,7 +6,7 @@ This proposal is based on the pre-port CED call sites and is not wired into serv
 
 GPU tests, teacher-forced identity, multi-request numerical identity, sampled prefix-hit acceptance and release prefill remain required. No promotion.
 
-## Rebased on the TileLang CED ports (vLLM 3e5e91c31, on e4d57b3fb)
+## Rebased on the TileLang CED ports (vLLM beb1b2972, on 1a15f6b6b)
 
 `candidate.patch` is now the skip on the switched ports: `nonfinal_limits` feeds the
 TileLang requests kernel's per-request limits through `CEDState.stage`, so the Triton
@@ -30,7 +30,7 @@ The prefix-hit sweep's draft-side differences are item 4's question; serving's d
 pages are private (experiments/2026-10-19-prefix-replay).
 
 **Tests** (`bundles/skip-tests`: the skip's tests and the four release-gated CED files, a
-test container on DGX4): 267 passed. Two existing model-state tests now set the skip's
+test container on DGX4): 267 passed, again on the ports' follow-ups (1a15f6b6b). Two existing model-state tests now set the skip's
 state, which they construct by hand.
 
 Full-model gates: experiments/2026-10-19-ced-gates. No promotion.
