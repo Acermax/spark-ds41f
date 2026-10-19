@@ -1,6 +1,6 @@
-From 2334b92c0b30a3d561044db6842ede3b16f7b8cb Mon Sep 17 00:00:00 2001
+From e1c474dca31fdfe6831ec1b9968a1a743fd3eefc Mon Sep 17 00:00:00 2001
 From: Christopher Owen <3221756+christopherowen@users.noreply.github.com>
-Date: Mon, 19 Oct 2026 23:46:24 +0200
+Date: Tue, 20 Oct 2026 00:16:32 +0200
 Subject: [PATCH] Sink detector and draft-zero rejection: verify each step's
  last sampled token as draft zero of the next
 
@@ -49,7 +49,8 @@ usage.sink_rejection on every response with the detector on. The V2 runner refus
 rejection with the features it does not handle (pipeline parallelism, batch-sharded
 sampling, PCP, DBO, other drafters, probabilistic drafts, watermarking, sampling masks,
 trace replay, routed experts, KV transfer, boundary checkpoints). The warmup's synthetic
-decode steps carry draft zero, and its flags are not counted.
+decode steps carry draft zero; their rows (token 0, DeepSeek V4.1's BOS, the sink token)
+are flagged but neither logged nor counted.
 
 Tests: the scheduler and frontend with a scripted worker (sync and async: the collapse
 sequence by draft-zero rejection and by drafter cut, fallthrough, a rejection in the middle
@@ -63,7 +64,7 @@ unchanged. The tokenizer, parser, sampling, verification, drafter-input and sche
 suites fail exactly where the untouched image fails offline.
 ---
  tests/v1/core/test_sink_draft_zero.py         | 912 ++++++++++++++++++
- tests/v1/worker/test_gpu_sink.py              | 840 ++++++++++++++++
+ tests/v1/worker/test_gpu_sink.py              | 879 +++++++++++++++++
  vllm/entrypoints/generate/base/serving.py     |  23 +-
  .../openai/chat_completion/serving.py         |   3 +
  vllm/entrypoints/openai/completion/serving.py |   3 +
@@ -89,11 +90,11 @@ suites fail exactly where the untouched image fails offline.
  vllm/v1/worker/gpu/sample/gumbel.py           |  32 +-
  vllm/v1/worker/gpu/sample/output.py           |   9 +-
  vllm/v1/worker/gpu/sample/sampler.py          |  31 +
- vllm/v1/worker/gpu/sample/sink.py             | 771 +++++++++++++++
+ vllm/v1/worker/gpu/sample/sink.py             | 779 +++++++++++++++
  .../gpu/spec_decode/dflash/speculator.py      |   9 +-
  .../gpu/spec_decode/rejection_sampler.py      |  97 +-
- vllm/v1/worker/gpu/warmup.py                  |  22 +-
- 31 files changed, 3825 insertions(+), 59 deletions(-)
+ vllm/v1/worker/gpu/warmup.py                  |  24 +-
+ 31 files changed, 3874 insertions(+), 59 deletions(-)
  create mode 100644 tests/v1/core/test_sink_draft_zero.py
  create mode 100644 tests/v1/worker/test_gpu_sink.py
  create mode 100644 vllm/v1/sample/sink.py
@@ -1019,10 +1020,10 @@ index 000000000..d6f4d4bef
 +    assert config.rejection and config.num_alternates == 3
 diff --git a/tests/v1/worker/test_gpu_sink.py b/tests/v1/worker/test_gpu_sink.py
 new file mode 100644
-index 000000000..af64b4a8d
+index 000000000..41e8f6896
 --- /dev/null
 +++ b/tests/v1/worker/test_gpu_sink.py
-@@ -0,0 +1,840 @@
+@@ -0,0 +1,879 @@
 +# SPDX-License-Identifier: Apache-2.0
 +# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 +"""Sink rejection on the V2 runner's sampling layer, through the real kernels
@@ -1442,6 +1443,45 @@ index 000000000..af64b4a8d
 +    # A sunk committed token and a sunk accepted draft, counted.
 +    assert r.out.events.tolist()[0] == [SinkOutcome.FLAGGED, SinkRow.DRAFT_ZERO, 1, -1]
 +    assert sink.counts.tolist() == [1, 1, 0]
++
++
++def test_warmup_rows_are_neither_logged_nor_kept(monkeypatch: pytest.MonkeyPatch):
++    """The startup warmup's synthetic rows (token 0, the BOS, as draft zero)
++    are flagged but never logged, and its end forgets them; afterwards a
++    flagged row is logged once its count is read back."""
++    from vllm.v1.worker.gpu.sample import sink as sink_module
++
++    lines: list[str] = []
++    monkeypatch.setattr(
++        sink_module.logger, "info", lambda message, *args: lines.append(message % args)
++    )
++    sink = _sink(DETECTOR)
++    case = PolicyCase(
++        sampled=[[41]],
++        num_sampled=[1],
++        rows=[1],
++        decoding=[1],
++        flags=[1],
++        drafts=[0],
++        new_alternates=[],
++    )
++
++    def step() -> None:
++        _apply(sink, case)
++        sink.log_counts(0)
++        torch.cuda.synchronize()
++        sink.log_counts(0)
++
++    sink.warming = True
++    step()
++    assert sink.counts.tolist() == [1, 0, 0]
++    assert lines == []
++    sink.end_warmup()
++    assert sink.counts.tolist() == [0, 0, 0] and not sink.warming
++    step()
++    assert lines == [
++        "Sink detector, rank 0: 1 flagged rows (draft zero 1, drafter 0, prompt 0)"
++    ]
 +
 +
 +def test_post_update_replaces_draft_zero():
@@ -3992,10 +4032,10 @@ index c9abf4652..187fafa7a 100644
  
 diff --git a/vllm/v1/worker/gpu/sample/sink.py b/vllm/v1/worker/gpu/sample/sink.py
 new file mode 100644
-index 000000000..ad844a5b8
+index 000000000..7b5fb48e8
 --- /dev/null
 +++ b/vllm/v1/worker/gpu/sample/sink.py
-@@ -0,0 +1,771 @@
+@@ -0,0 +1,779 @@
 +# SPDX-License-Identifier: Apache-2.0
 +# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 +"""The attention-sink detector and draft-zero rejection on the V2 model runner
@@ -4448,6 +4488,8 @@ index 000000000..ad844a5b8
 +        )
 +        self._counts_event: torch.cuda.Event | None = None
 +        self._logged_counts = (0,) * len(SinkRow)
++        # Set during the startup warmup (end_warmup clears it).
++        self.warming = False
 +
 +    def flags(
 +        self,
@@ -4704,16 +4746,22 @@ index 000000000..ad844a5b8
 +        )
 +        return out
 +
-+    def reset_counts(self) -> None:
-+        """Forget the rows flagged so far (the startup warmup's)."""
++    def end_warmup(self) -> None:
++        """Forget the rows the startup warmup flagged, and log from now on. Its
++        synthetic inputs hold token 0, DeepSeek V4.1's BOS, the sink token
++        itself, which the detector rightly flags."""
++        self.warming = False
 +        self.counts.zero_()
 +        self._counts_event = None
 +        self._logged_counts = (0,) * len(SinkRow)
 +
 +    def log_counts(self, rank: int) -> None:
-+        """Logs this rank's flagged-row counts when they changed. The counts
-+        come from the previous step's copy, read only once it completed: no
-+        synchronization. Then queues this step's copy."""
++        """Logs this rank's flagged-row counts when they changed, except during
++        the startup warmup. The counts come from the previous step's copy, read
++        only once it completed: no synchronization. Then queues this step's
++        copy."""
++        if self.warming:
++            return
 +        event = self._counts_event
 +        if event is not None and event.query():
 +            counts = tuple(int(c) for c in self._counts_host.tolist())
@@ -4998,7 +5046,7 @@ index 21658e528..bb7c03740 100644
 +            sink_alternates=alternates,
          )
 diff --git a/vllm/v1/worker/gpu/warmup.py b/vllm/v1/worker/gpu/warmup.py
-index e17d7d37d..70090a558 100644
+index e17d7d37d..d7efd302a 100644
 --- a/vllm/v1/worker/gpu/warmup.py
 +++ b/vllm/v1/worker/gpu/warmup.py
 @@ -101,6 +101,13 @@ def _warmup_block_counter(
@@ -5025,18 +5073,27 @@ index e17d7d37d..70090a558 100644
      mixed_output.total_num_scheduled_tokens = num_tokens
      mixed_output.num_common_prefix_blocks = [0] * num_kv_cache_groups
  
-@@ -255,6 +265,10 @@ def warmup_kernels(
+@@ -248,6 +258,10 @@ def warmup_kernels(
+     if adaptive_sampling:
+         assert rejection_sampler is not None
+         rejection_sampler.enable_adaptive_verification = False
++    sink = getattr(model_runner, "sink", None)
++    if sink is not None:
++        # The warmup's synthetic rows are not traffic: neither logged nor kept.
++        sink.warming = True
+     try:
+         _warmup_kernels(model_runner, worker_execute_model, worker_sample_tokens)
+     finally:
+@@ -255,6 +269,8 @@ def warmup_kernels(
          if adaptive_sampling:
              assert rejection_sampler is not None
              rejection_sampler.enable_adaptive_verification = True
-+        sink = getattr(model_runner, "sink", None)
 +        if sink is not None:
-+            # The warmup's synthetic rows are not traffic.
-+            sink.reset_counts()
++            sink.end_warmup()
      _warmup_dead_row_kernels(model_runner)
  
  
-@@ -445,6 +459,8 @@ def _warmup_kernels(
+@@ -445,6 +461,8 @@ def _warmup_kernels(
          req_computed = [prompt_len] * num_reqs
          req_blocks = [list(prefill_block_counts) for _ in range(num_reqs)]
  
@@ -5045,7 +5102,7 @@ index e17d7d37d..70090a558 100644
          def _run_decode_step(indices: list[int], spec_flags: list[bool]) -> None:
              """Decode `indices`, spec-decoding the ones flagged in `spec_flags`."""
              cached_req_data = CachedRequestData.make_empty()
-@@ -469,13 +485,17 @@ def _warmup_kernels(
+@@ -469,13 +487,17 @@ def _warmup_kernels(
                      held + delta for held, delta in zip(req_blocks[i], deltas)
                  ]
                  step_num_scheduled_tokens[req_ids[i]] = num_tokens

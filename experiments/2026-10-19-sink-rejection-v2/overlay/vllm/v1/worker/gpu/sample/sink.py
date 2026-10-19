@@ -450,6 +450,8 @@ class SinkSampler:
         )
         self._counts_event: torch.cuda.Event | None = None
         self._logged_counts = (0,) * len(SinkRow)
+        # Set during the startup warmup (end_warmup clears it).
+        self.warming = False
 
     def flags(
         self,
@@ -706,16 +708,22 @@ class SinkSampler:
         )
         return out
 
-    def reset_counts(self) -> None:
-        """Forget the rows flagged so far (the startup warmup's)."""
+    def end_warmup(self) -> None:
+        """Forget the rows the startup warmup flagged, and log from now on. Its
+        synthetic inputs hold token 0, DeepSeek V4.1's BOS, the sink token
+        itself, which the detector rightly flags."""
+        self.warming = False
         self.counts.zero_()
         self._counts_event = None
         self._logged_counts = (0,) * len(SinkRow)
 
     def log_counts(self, rank: int) -> None:
-        """Logs this rank's flagged-row counts when they changed. The counts
-        come from the previous step's copy, read only once it completed: no
-        synchronization. Then queues this step's copy."""
+        """Logs this rank's flagged-row counts when they changed, except during
+        the startup warmup. The counts come from the previous step's copy, read
+        only once it completed: no synchronization. Then queues this step's
+        copy."""
+        if self.warming:
+            return
         event = self._counts_event
         if event is not None and event.query():
             counts = tuple(int(c) for c in self._counts_host.tolist())

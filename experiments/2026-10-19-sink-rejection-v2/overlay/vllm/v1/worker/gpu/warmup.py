@@ -258,6 +258,10 @@ def warmup_kernels(
     if adaptive_sampling:
         assert rejection_sampler is not None
         rejection_sampler.enable_adaptive_verification = False
+    sink = getattr(model_runner, "sink", None)
+    if sink is not None:
+        # The warmup's synthetic rows are not traffic: neither logged nor kept.
+        sink.warming = True
     try:
         _warmup_kernels(model_runner, worker_execute_model, worker_sample_tokens)
     finally:
@@ -265,10 +269,8 @@ def warmup_kernels(
         if adaptive_sampling:
             assert rejection_sampler is not None
             rejection_sampler.enable_adaptive_verification = True
-        sink = getattr(model_runner, "sink", None)
         if sink is not None:
-            # The warmup's synthetic rows are not traffic.
-            sink.reset_counts()
+            sink.end_warmup()
     _warmup_dead_row_kernels(model_runner)
 
 
