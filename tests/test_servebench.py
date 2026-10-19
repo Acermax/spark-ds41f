@@ -453,6 +453,26 @@ class StallTest(unittest.TestCase):
         finally:
             fake.close()
 
+    def test_a_suite_runs_and_compares_a_stall_step(self):
+        fake = FakeServer(prefill_stall_s=0.2)
+        steps = [{"id": "stall", "command": "stall",
+                  "args": {"sizes": [3000], "streams": 2, "max_tokens": 200000, "warmup": 0.1, "tail": 0.1,
+                           "repeats": 2}}]
+        definition = {"name": "stall-only", "version": 1, "description": "a stall step", "steps": steps}
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "stall.json")
+                Path(path).write_text(json.dumps(definition))
+                self.assertEqual(suite.load(path)["steps"], steps)
+                base, cand = os.path.join(tmp, "base"), os.path.join(tmp, "cand")
+                for out in (base, cand):
+                    self.assertEqual(cli.main(["suite", fake.url, "--suite", path, "--out", out]), 0)
+                result = suite.compare(cli.read_json, base, cand, lambda b, c: cli.compare_results(b, c, 3.0))
+                self.assertEqual(result["steps"]["stall"][0], stall.SCHEMA)
+                self.assertEqual(len(result["steps"]["stall"][1]["rows"]), 4)
+        finally:
+            fake.close()
+
     def test_a_stopped_stream_is_not_an_error(self):
         fake = FakeServer()
         try:
@@ -632,7 +652,7 @@ class SuiteTest(unittest.TestCase):
         model = {"id": "m", "command": "model", "args": {}}
         self.assertIn("--corpus", suite.arguments(model, "U", "O", None, "C"))
         self.assertEqual(suite.check({"name": "x", "steps": [{"id": "a", "command": "dance"}]}),
-                         ["step a: command must be one of model, engine, run, prefill"])
+                         ["step a: command must be one of model, engine, run, prefill, stall"])
 
     def test_floor_verdicts(self):
         def outcome(grid, tps):
