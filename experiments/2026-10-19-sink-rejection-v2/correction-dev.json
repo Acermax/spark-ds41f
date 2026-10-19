@@ -1,5 +1,5 @@
 {
- "notes": "r6x-dev.json with the candidate's vLLM files (overlay/, vLLM 7f4c7dc8e on r6x-candidate f3b58ed9d, the image's tree) and the detector and draft-zero rejection on.",
+ "notes": "r6x-dev.json with the candidate's vLLM files (overlay/, vLLM 2334b92c0 on r6x-candidate f3b58ed9d, the image's tree) and the detector and draft-zero rejection on.",
  "extends": {
   "config": "experiments/2026-10-19-sink-rejection-v2/r6x-dev.json"
  },
@@ -37,13 +37,13 @@
      "ro"
     ],
     [
-     "{home}/projects/spark-ds41f/experiments/2026-10-19-sink-rejection-v2/overlay/vllm/models/deepseek_v41/nvidia/model.py",
-     "/opt/spark3/candidate/vllm/vllm/models/deepseek_v41/nvidia/model.py",
+     "{home}/projects/spark-ds41f/experiments/2026-10-19-sink-rejection-v2/overlay/vllm/models/deepseek_v4_1/nvidia/model.py",
+     "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/nvidia/model.py",
      "ro"
     ],
     [
-     "{home}/projects/spark-ds41f/experiments/2026-10-19-sink-rejection-v2/overlay/vllm/models/deepseek_v41/nvidia/vl_model.py",
-     "/opt/spark3/candidate/vllm/vllm/models/deepseek_v41/nvidia/vl_model.py",
+     "{home}/projects/spark-ds41f/experiments/2026-10-19-sink-rejection-v2/overlay/vllm/models/deepseek_v4_1/nvidia/vl_model.py",
+     "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/nvidia/vl_model.py",
      "ro"
     ],
     [

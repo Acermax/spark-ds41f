@@ -6,7 +6,7 @@ token, with the forward pass untouched. v1 of the candidate (record on the local
 rollback. A read-only review the same day found the rollback unsafe. This record rebuilds the
 correction on the speculative-decoding machinery.
 
-**Done:** vLLM branch `sink-rejection-v2`, one commit on `r6x-candidate` f3b58ed9d (7f4c7dc8e), in
+**Done:** vLLM branch `sink-rejection-v2`, one commit on `r6x-candidate` f3b58ed9d (2334b92c0), in
 ~/projects/vllm-ds41-sink-rejection; the series patch
 [vllm/0221-Sink-detector-and-draft-zero-rejection.patch](vllm/0221-Sink-detector-and-draft-zero-rejection.patch)
 (provisional number 0221, replacing v1's 0221; one patch onto `r6x-candidate` f3b58ed9d).
@@ -170,7 +170,7 @@ The GPU gate measures the step cost.
 | Area | Files |
 |---|---|
 | configuration, events | `vllm/v1/sample/sink.py`, `envs.py` (threshold 50,000, rank check, compile-key exclusions) |
-| model | `models/deepseek_v41/nvidia/model.py`, `vl_model.py`: `get_sink_residual_columns()` |
+| model | `models/deepseek_v4_1/nvidia/model.py`, `vl_model.py` (the SM120 model GB10 loads): `get_sink_residual_columns()` |
 | V2 runner | `worker/gpu/sample/sink.py` (new), `model_runner.py`, `sample/sampler.py`, `sample/gumbel.py` (`gumbel_noised_scores`, the argmax unchanged), `sample/output.py`, `spec_decode/rejection_sampler.py`, `spec_decode/dflash/speculator.py` (zero valid rows), `async_utils.py`, `warmup.py` (warmup steps carry draft zero; counts reset after) |
 | scheduler | `core/sched/scheduler.py`, `async_scheduler.py`, `output.py`, `utils.py`, `request.py`, `structured_output/__init__.py` |
 | surfaces | `v1/metrics/stats.py`, `loggers.py`, `v1/engine/__init__.py`, `output_processor.py`, `outputs.py`, `v1/outputs.py`, `entrypoints/...` |
@@ -183,6 +183,7 @@ The GPU gate measures the step cost.
 | v1, 82eff9023 | 3,436 | 1,487 / 34 (26 files) | 853 |
 | v2 first build, ad9059483 (on v1's branch) | 5,502 | 2,465 / 74 (30 files) | 1,752 |
 | v2, 7f4c7dc8e (one commit on `r6x-candidate`) | 5,063 | 2,069 / 59 (29 files) | 1,752 |
+| v2, 2334b92c0 (the column capture in the SM120 model) | 5,069 | 2,073 / 59 (29 files) | 1,752 |
 
 Cut from the first build, with the same tests passing: the flags, the cut and the merge of the
 candidates became torch operations (three Triton kernels and their warmup declarations gone; the
@@ -218,7 +219,7 @@ fail in the image as built.
 
 [screen.json](screen.json) then [probes.json](probes.json), queued into one lab window on the TP3
 triangle. The arms mount the candidate's 29
-changed vLLM files ([overlay/](overlay), vLLM 7f4c7dc8e) over the r6x image, whose tree is the
+changed vLLM files ([overlay/](overlay), vLLM 2334b92c0) over the r6x image, whose tree is the
 candidate's base: every change is Python, so this is the candidate's image.
 
 | Arm | What it is |
@@ -236,6 +237,17 @@ candidate's base: every change is Python, so this is the candidate's image.
 2. **The collapse and the ranks** (gate items 2 and 6): [probes.py](probes.py) on correction-ranks,
    detector and r6x: the 16 answers, `usage.sink_rejection`, the `vllm:sink_*` counters and each
    rank's detector log line.
+
+**First attempt, 2026-10-19 21:36-21:43 UTC (#437, vLLM 7f4c7dc8e):** both overlay arms failed to
+boot on every rank: `ValueError: The sink detector needs the model to keep its residual column`. On
+SM120 (GB10) vLLM loads DeepSeek V4.1 from `vllm/models/deepseek_v4_1/`; the candidate had put the
+column capture in `vllm/models/deepseek_v41/nvidia/model.py`, the generic NVIDIA model that never runs
+on the Sparks (v1 had the same gap). No unit test loads the model. The window closed on a request and
+restored production (`doctor --live` OK). vLLM 2334b92c0 moves the capture into the SM120 model, after
+the last layer's `mhc.post` and before the collapse and norm, gathered like the hidden states (static
+sequence parallelism, per-forward prefill SP, CED row compaction), and leaves the generic model
+untouched. The suites on dgx4 give the same results ([runs/tests.txt](runs/tests.txt)); runs `-screen2`
+and `-probes2` repeat the screen.
 
 ## Planned GPU gate (not run: dgx1-dgx3 are benching)
 
