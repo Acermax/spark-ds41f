@@ -702,6 +702,25 @@ class TelemetryTest(unittest.TestCase):
                          [("VLLM::Worker_TP", 0.9, 0.0), ("engram", 0.25, 1.0)])
         self.assertAlmostEqual(summary["slow_core_share"], 1.02 / 4.62, places=3)
         self.assertEqual(lab.summarize_threads("not json")["samples"], 0)
+        self.assertNotIn("busy_l3", summary)  # a sampler that listed no clusters
+
+    def test_thread_summary_l3_clusters(self) -> None:
+        lines = [json.dumps({"fast": [5, 6, 15, 16], "clusters": [[0, 1, 5, 6], [10, 11, 15, 16]]})]
+        cores = {"proxy": [5, 5, 5, 5], "worker": [15, 15, 6, 15], "engine": [6, 6, 6, 6]}
+        for step in range(4):
+            lines.append(json.dumps({"t": 100.0 + 2 * step, "threads": {
+                "21": ["sparknet-proxy", 2.0 * step, cores["proxy"][step]],
+                "22": ["VLLM::Worker_TP", 1.8 * step, cores["worker"][step]],
+                "23": ["EngineCore", 1.9 * step, cores["engine"][step]]}}))
+        summary = lab.summarize_threads("\n".join(lines))
+        threads = {t["name"]: t for t in summary["busy_threads"]}
+        self.assertEqual((threads["sparknet-proxy"]["l3"], threads["sparknet-proxy"]["l3_share"],
+                          threads["sparknet-proxy"]["core_changes"]), (0, 1.0, 0))
+        # The worker ran two intervals on the second L3 and one on the first, moving twice.
+        self.assertEqual((threads["VLLM::Worker_TP"]["l3"], threads["VLLM::Worker_TP"]["l3_share"],
+                          threads["VLLM::Worker_TP"]["core_changes"]), (1, 0.667, 2))
+        self.assertEqual(summary["busy_l3"], [0, 1])
+        self.assertEqual(summary["l3_clusters"], [[0, 1, 5, 6], [10, 11, 15, 16]])
 
     def test_buddy_free(self) -> None:
         text = ("Node 0, zone      DMA      2      0      0      0      0      1\n"
