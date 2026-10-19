@@ -1,6 +1,6 @@
-From 7f4c7dc8e2afdbff759dc9717c49b4cf903a4cd7 Mon Sep 17 00:00:00 2001
+From 2334b92c0b30a3d561044db6842ede3b16f7b8cb Mon Sep 17 00:00:00 2001
 From: Christopher Owen <3221756+christopherowen@users.noreply.github.com>
-Date: Mon, 19 Oct 2026 22:59:13 +0200
+Date: Mon, 19 Oct 2026 23:46:24 +0200
 Subject: [PATCH] Sink detector and draft-zero rejection: verify each step's
  last sampled token as draft zero of the next
 
@@ -34,8 +34,10 @@ rejected draft zero out of the request state before the update appends its repla
 The flags, the cut and the merge of the candidates are sync-free torch operations.
 FlashInfer sampling stays on with rejection off.
 
-The detector reads the watched column of each residual stream, which the model keeps as
-[tokens, 4] float32 (get_sink_residual_columns). Default threshold 50000: sunk sampled rows
+The detector reads the watched column of each residual stream, which the SM120 V4.1 model
+(vllm/models/deepseek_v4_1, the one GB10 loads) keeps as [tokens, 4] float32
+(get_sink_residual_columns), gathered like its hidden states under sequence parallelism and
+CED row compaction; the runner refuses models without it. Default threshold 50000: sunk sampled rows
 108,032-125,440, clean ones at most 10,688 on the CPU reference. Dead verification rows are
 not flagged. VLLM_SINK_DETECTOR_CHECK_RANKS=1 checks the tensor-parallel ranks' flags every
 step (lab only). The sampling-only settings stay out of the compile cache key.
@@ -67,8 +69,8 @@ suites fail exactly where the untouched image fails offline.
  vllm/entrypoints/openai/completion/serving.py |   3 +
  vllm/entrypoints/serve/engine/protocol.py     |  16 +
  vllm/envs.py                                  |  39 +
- vllm/models/deepseek_v41/nvidia/model.py      |  26 +
- vllm/models/deepseek_v41/nvidia/vl_model.py   |   4 +
+ vllm/models/deepseek_v4_1/nvidia/model.py     |  30 +
+ vllm/models/deepseek_v4_1/nvidia/vl_model.py  |   4 +
  vllm/outputs.py                               |   9 +-
  vllm/v1/core/sched/async_scheduler.py         |  38 +-
  vllm/v1/core/sched/output.py                  |   5 +
@@ -91,7 +93,7 @@ suites fail exactly where the untouched image fails offline.
  .../gpu/spec_decode/dflash/speculator.py      |   9 +-
  .../gpu/spec_decode/rejection_sampler.py      |  97 +-
  vllm/v1/worker/gpu/warmup.py                  |  22 +-
- 31 files changed, 3821 insertions(+), 59 deletions(-)
+ 31 files changed, 3825 insertions(+), 59 deletions(-)
  create mode 100644 tests/v1/core/test_sink_draft_zero.py
  create mode 100644 tests/v1/worker/test_gpu_sink.py
  create mode 100644 vllm/v1/sample/sink.py
@@ -2052,22 +2054,22 @@ index 2f320dfca..7f4eb9974 100755
      }
  
      from vllm.config.utils import normalize_value
-diff --git a/vllm/models/deepseek_v41/nvidia/model.py b/vllm/models/deepseek_v41/nvidia/model.py
-index 2adeb2753..8466e6bb1 100644
---- a/vllm/models/deepseek_v41/nvidia/model.py
-+++ b/vllm/models/deepseek_v41/nvidia/model.py
-@@ -73,6 +73,7 @@ from vllm.platforms import current_platform
- from vllm.sequence import IntermediateTensors
- from vllm.utils.math_utils import cdiv
+diff --git a/vllm/models/deepseek_v4_1/nvidia/model.py b/vllm/models/deepseek_v4_1/nvidia/model.py
+index 61396ebfb..3109413e9 100644
+--- a/vllm/models/deepseek_v4_1/nvidia/model.py
++++ b/vllm/models/deepseek_v4_1/nvidia/model.py
+@@ -60,6 +60,7 @@ from vllm.utils.b12x import (
+     set_b12x_preparation_provider,
+ )
  from vllm.v1.attention.backends.registry import AttentionBackendEnum
 +from vllm.v1.sample.sink import SinkConfig
  from vllm.v1.worker.ubatching import dbo_current_ubatch_id
  
- from ..common.engram import EngramLayout, NgramHashState
-@@ -569,6 +570,18 @@ class DeepseekV4Model(nn.Module, EagleModelMixin):
-             )
-         else:
-             self._mtp_hidden_buffer = None
+ from .. import kernels, l2_prefetch, sp_prefill
+@@ -557,6 +558,18 @@ class DeepseekV4Model(nn.Module, EagleModelMixin):
+         self.prefill_sp_skips_mtp_buffer = (
+             spec_config is not None and spec_config.use_dspark()
+         )
 +        # The attention-sink detector (vllm.v1.sample.sink) watches one column
 +        # of the pre-norm residual: each forward keeps that column of every
 +        # residual stream, [tokens, hc_mult] (float32), for every token.
@@ -2081,9 +2083,9 @@ index 2adeb2753..8466e6bb1 100644
 +                dtype=torch.float32,
 +            )
  
-     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
-         return self.embed_tokens(input_ids)
-@@ -742,6 +755,13 @@ class DeepseekV4Model(nn.Module, EagleModelMixin):
+     def prepare_disk_engram(
+         self, input_ids, query_start_loc, lookback_token_ids, early=None
+@@ -834,6 +847,17 @@ class DeepseekV4Model(nn.Module, EagleModelMixin):
                  {"hidden_states": hidden_states, "pre_mix": pre_mix}
              )
  
@@ -2092,39 +2094,43 @@ index 2adeb2753..8466e6bb1 100644
 +            columns = hidden_states[:, :, self._sink_column].float().contiguous()
 +            if self.use_sequence_parallel:
 +                columns = sp_all_gather(columns)[:full_num_tokens]
-+            self._sink_columns[: columns.shape[0]].copy_(columns)
++            elif sp is not None:
++                columns = sp.gather(columns)
++            if decoder_compacted:
++                columns = scatter_rows(columns, ced_indices, full_num_tokens)
++            self._sink_columns[:full_num_tokens].copy_(columns)
 +
          # MTP needs full HC states; otherwise collapse and normalize locally
          # before gathering to reduce communication.
-         if self._mtp_hidden_buffer is not None:
-@@ -1184,6 +1204,12 @@ class DeepseekV41LLMForCausalLM(
-         forward(); valid after each target step."""
-         return getattr(self.model, "_mtp_hidden_buffer", None)
+         if self._mtp_hidden_buffer is not None and not (
+@@ -1079,6 +1103,12 @@ class DeepseekV41LLMForCausalLM(UpstreamDeepseekV41LLMForCausalLM):
+ 
+     requires_accepted_token_lookback = True
  
 +    def get_sink_residual_columns(self) -> torch.Tensor | None:
 +        """The attention-sink detector's column of each pre-norm residual
 +        stream, (max_num_batched_tokens, hc_mult) float32, for every token of
 +        the last forward; None without the detector (vllm.v1.sample.sink)."""
-+        return getattr(self.model, "_sink_columns", None)
++        return self.model._sink_columns
 +
-     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-         loader = AutoWeightsLoader(self)
-         loaded_params = loader.load_weights(weights, mapper=self.hf_to_vllm_mapper)
-diff --git a/vllm/models/deepseek_v41/nvidia/vl_model.py b/vllm/models/deepseek_v41/nvidia/vl_model.py
-index bfbcaa89a..732e4fa86 100644
---- a/vllm/models/deepseek_v41/nvidia/vl_model.py
-+++ b/vllm/models/deepseek_v41/nvidia/vl_model.py
-@@ -327,6 +327,10 @@ class DeepseekV41ForCausalLM(nn.Module, SupportsMultiModal, SupportsPP, Supports
-         """Pre-hc_head residual stream buffer for the MTP/DSpark draft model."""
-         return self.language_model.get_mtp_target_hidden_states()
+     def forward(
+         self,
+         input_ids: torch.Tensor,
+diff --git a/vllm/models/deepseek_v4_1/nvidia/vl_model.py b/vllm/models/deepseek_v4_1/nvidia/vl_model.py
+index 462bdb4fc..a2508b509 100644
+--- a/vllm/models/deepseek_v4_1/nvidia/vl_model.py
++++ b/vllm/models/deepseek_v4_1/nvidia/vl_model.py
+@@ -143,6 +143,10 @@ class DeepseekV41ForCausalLM(UpstreamDeepseekV41ForCausalLM):
+             span_offset += span_len
+         return tuple(embeds)
  
 +    def get_sink_residual_columns(self) -> torch.Tensor | None:
 +        """The attention-sink detector's residual column per stream."""
 +        return self.language_model.get_sink_residual_columns()
 +
-     def load_weights(self, weights: Iterable[tuple[str, torch.Tensor]]) -> set[str]:
-         # Map HF names into this wrapper's namespace up front and sort, so
-         # the "language_model." group reaches the child loader as one
+     @staticmethod
+     def get_model_state_cls():
+         from .model_state import DeepseekV41ModelState
 diff --git a/vllm/outputs.py b/vllm/outputs.py
 index 84b9fccdc..a71e1fafa 100644
 --- a/vllm/outputs.py
@@ -3443,7 +3449,7 @@ index 4c0988eef..7099c6198 100644
          if self.routed_experts_cpu is not None:
              self.model_runner_output.routed_experts = self.routed_experts_cpu.tolists()
 diff --git a/vllm/v1/worker/gpu/model_runner.py b/vllm/v1/worker/gpu/model_runner.py
-index f27cb88b7..f95037f36 100644
+index f27cb88b7..9c2d9793d 100644
 --- a/vllm/v1/worker/gpu/model_runner.py
 +++ b/vllm/v1/worker/gpu/model_runner.py
 @@ -35,9 +35,11 @@ from vllm.compilation.counter import compilation_counter
@@ -3692,7 +3698,7 @@ index f27cb88b7..f95037f36 100644
 +        if get_columns is None or get_columns() is None:
 +            raise ValueError(
 +                "The sink detector needs the model to keep its residual column "
-+                "(get_sink_residual_columns); DeepSeek V4.1 does."
++                "(get_sink_residual_columns); DeepSeek V4.1 on SM120 does."
 +            )
 +        assert self.sampler is not None
 +        self.sink = SinkSampler(

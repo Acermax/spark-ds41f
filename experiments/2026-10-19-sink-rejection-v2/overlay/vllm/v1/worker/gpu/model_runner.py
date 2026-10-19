@@ -2389,7 +2389,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
         if get_columns is None or get_columns() is None:
             raise ValueError(
                 "The sink detector needs the model to keep its residual column "
-                "(get_sink_residual_columns); DeepSeek V4.1 does."
+                "(get_sink_residual_columns); DeepSeek V4.1 on SM120 does."
             )
         assert self.sampler is not None
         self.sink = SinkSampler(

@@ -38,13 +38,13 @@
      "ro"
     ],
     [
-     "{home}/projects/spark-ds41f/experiments/2026-10-19-sink-rejection-v2/overlay/vllm/models/deepseek_v41/nvidia/model.py",
-     "/opt/spark3/candidate/vllm/vllm/models/deepseek_v41/nvidia/model.py",
+     "{home}/projects/spark-ds41f/experiments/2026-10-19-sink-rejection-v2/overlay/vllm/models/deepseek_v4_1/nvidia/model.py",
+     "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/nvidia/model.py",
      "ro"
     ],
     [
-     "{home}/projects/spark-ds41f/experiments/2026-10-19-sink-rejection-v2/overlay/vllm/models/deepseek_v41/nvidia/vl_model.py",
-     "/opt/spark3/candidate/vllm/vllm/models/deepseek_v41/nvidia/vl_model.py",
+     "{home}/projects/spark-ds41f/experiments/2026-10-19-sink-rejection-v2/overlay/vllm/models/deepseek_v4_1/nvidia/vl_model.py",
+     "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/nvidia/vl_model.py",
      "ro"
     ],
     [
