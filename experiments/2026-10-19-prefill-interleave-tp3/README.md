@@ -23,3 +23,16 @@ budgets 4,096 and 8,192, then 4,096 at interval 1 again (the repeat).
   the long prompt's chunks.
 
 No promotion or production change.
+
+## Determinism (2026-10-19 14:15-14:26 UTC)
+
+Interval 2 at 4,096 reproduces the skip's digests at both long prompts (62313cb5 /
+9742ac2c and 62313cb5 / f6171075), with zero token and log-probability differences in
+every scenario: interleaving moves decode rows between steps without changing a bit.
+
+Interval 3 at 8,192 did not boot: dgx1's startup guard stopped it at 4.78 GiB MemAvailable
+(5 GiB floor). The same budget booted at 13:01 (budget sweep), so 8,192's startup margin on
+TP3 is thin enough to fail some boots. The chunking check moves to 6,144 (`chunking.json`,
+`skip-6144-i1-tp3.json`): long prompts split at 6,096 instead of 4,048 and 8,096, so equal
+digests show outputs do not depend on where a prompt splits (the encoder side of item 6's
+load-dependent chunks).
