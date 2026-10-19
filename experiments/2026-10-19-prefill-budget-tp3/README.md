@@ -12,13 +12,17 @@ skip, 8,192 already booted past dgx1's startup guard and kept it 1.5 GiB above i
 guard through a 1M prefill (experiments/2026-10-19-r6x-tp3-1m), so no in-between arm is
 needed for memory; 6,144 maps the trade between the two.
 
-`sweep.json` measures 4,096, 6,144, 8,192 and 4,096 again (the repeat) with `suite.json`:
+`ports-4096-tp3.json` is the gates' ports arm (no skip) at 4,096, the same-session
+reference for the skip at 1M and for its effect on the stall.
+
+`sweep.json` measures the skip at 4,096, the ports at 4,096, the skip at 6,144 and 8,192,
+and the skip at 4,096 again (the repeat), with `suite.json`:
 - release-tp3's prefill sizes, 32K to 500K, three repeats;
 - `servebench stall`: what seven decoding streams wait while a cold 131K prompt
   prefills (TP3 serves eight sequences), three repeats: the worst wait (the longest step
   carrying a prefill chunk), the median and p99 step during the prefill, the baseline;
-- a cold 1M prefill, during which the run's memory watch records dgx1's lowest
-  MemAvailable against its 3 GiB guard.
+- three cold 1M prefills (TP3 serves 1M since r6x), during which the run's memory watch
+  records dgx1's lowest MemAvailable against its 3 GiB guard.
 
 Gate for a larger budget: dgx1 above its guard at boot and through the 1M prefill, and a
 stall the owner accepts for the prefill it buys. tests/test_recipe.py pins each shape's
