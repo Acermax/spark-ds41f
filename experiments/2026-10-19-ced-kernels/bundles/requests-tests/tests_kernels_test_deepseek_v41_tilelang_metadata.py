@@ -2,6 +2,8 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """DeepSeek-V4.1 TileLang sparse-MLA metadata against the Triton kernels, exactly."""
 
+import math
+
 import pytest
 import torch
 
@@ -87,12 +89,52 @@ DEVICE = "cuda"
 R, CAP, COLS = 16, 1024, 40
 
 
+def _triton_copy(source, indices, rows, scatter):
+    """Triton's row copy, which the TileLang copy replaced (the benchmark's copy)."""
+    from benchmarks.kernels.ced_reference import _copy_rows
+
+    tail = tuple(source.shape[1:])
+    width = math.prod(tail)
+    output = source.new_zeros((rows, *tail))
+    _copy_rows[(triton.cdiv((source.shape[0] if scatter else rows) * width, 512),)](
+        source,
+        indices,
+        output,
+        source.shape[0],
+        rows,
+        tail,
+        source.stride(),
+        width,
+        scatter,
+        512,
+    )
+    return output
+
+
+def gather_rows(source, indices):
+    return _triton_copy(source, indices, indices.numel(), False)
+
+
+def scatter_rows(source, indices, rows):
+    return _triton_copy(source, indices, rows, True)
+
+
 @pytest.mark.parametrize(
-    "dtype", [torch.int64, torch.int32, torch.float32, torch.bfloat16, torch.bool]
+    "dtype",
+    [
+        torch.int64,
+        torch.int32,
+        torch.float32,
+        torch.bfloat16,
+        torch.bool,
+        torch.uint8,
+        torch.int8,
+        torch.float16,
+        torch.float64,
+    ],
 )
 @pytest.mark.parametrize("transpose", [False, True])
 def test_ced_row_copy_preserves_strides_invalid_indices_and_scatter(dtype, transpose):
-    from vllm.models.deepseek_v4_1.ced import gather_rows, scatter_rows
     from vllm.models.deepseek_v4_1.tilelang import ced
 
     source = torch.arange(7 * 3 * 5, device=DEVICE).reshape(7, 3, 5).to(dtype)
@@ -111,7 +153,6 @@ def test_ced_row_copy_preserves_strides_invalid_indices_and_scatter(dtype, trans
 @pytest.mark.parametrize("rows", [1, 48, 4048])
 @pytest.mark.parametrize("tail", [(5120,), (4, 5120)])
 def test_ced_row_copy_serving_widths(rows, tail):
-    from vllm.models.deepseek_v4_1.ced import gather_rows, scatter_rows
     from vllm.models.deepseek_v4_1.tilelang import ced
 
     source = torch.randn((rows, *tail), dtype=torch.bfloat16, device=DEVICE)
@@ -123,6 +164,112 @@ def test_ced_row_copy_serving_widths(rows, tail):
     restored = torch.zeros_like(source)
     ced.copy_rows(output, indices, restored, True)
     assert torch.equal(scatter_rows(output, indices, rows), restored)
+
+
+@pytest.mark.parametrize(
+    "dtype, tail",
+    [
+        (torch.int32, ()),
+        (torch.int64, ()),
+        (torch.bool, ()),
+        (torch.float32, (4,)),
+        (torch.float32, (4, 4)),
+        (torch.bfloat16, (5120,)),
+        (torch.bfloat16, (4, 5120)),
+    ],
+)
+@pytest.mark.parametrize("rows", [1, 129, 600])
+def test_ced_row_copy_serving_layouts_skip_invalid_rows(dtype, tail, rows):
+    """The serving layouts with the plan's -1 padding and out-of-range indices,
+    across a block boundary, against the Triton copies."""
+    from vllm.models.deepseek_v4_1.tilelang import ced
+
+    source = torch.randint(-100, 100, (rows, *tail), device=DEVICE).to(dtype)
+    kept = min(rows, 128)
+    indices = torch.cat(
+        [
+            torch.arange(rows - kept, rows, device=DEVICE),
+            torch.tensor([-1, rows, -5, 1 << 40], device=DEVICE),
+            torch.full((131,), -1, device=DEVICE),
+        ]
+    )
+    expected = gather_rows(source, indices)
+    output = torch.full_like(expected, 7)
+    ced.copy_rows(source, indices, output, False)
+    assert torch.equal(expected, output)
+    restored = torch.full_like(source, 3)
+    ced.copy_rows(output, indices, restored, True)
+    reference = torch.full_like(source, 3)
+    reference[indices[:kept]] = output[:kept]
+    assert torch.equal(reference, restored)
+    assert torch.equal(
+        scatter_rows(output, indices, rows)[indices[:kept]], output[:kept]
+    )
+
+
+@pytest.mark.parametrize(
+    "dtype, width, columns",
+    [
+        (torch.bfloat16, 5184, slice(64, 5184)),
+        (torch.float32, 20, slice(4, 20)),
+        (torch.int32, 3, 1),
+        (torch.bool, 5, 2),
+    ],
+)
+def test_ced_row_copy_views_of_wider_rows(dtype, width, columns):
+    """Column views of wider rows: the row stride is an argument, and the copies
+    match Triton's."""
+    from vllm.models.deepseek_v4_1.tilelang import ced
+
+    wide = torch.randint(-100, 100, (300, width), device=DEVICE).to(dtype)
+    source = wide[:, columns]
+    if source.ndim == 2 and source.shape[1] == 16:
+        source = source.unflatten(1, (4, 4))
+    indices = torch.cat(
+        [torch.arange(172, 300, device=DEVICE), torch.full((5,), -1, device=DEVICE)]
+    )
+    expected = gather_rows(source, indices)
+    output = torch.full_like(expected, 7)
+    ced.copy_rows(source, indices, output, False)
+    assert torch.equal(expected, output)
+    restored = torch.zeros((300, *source.shape[1:]), dtype=dtype, device=DEVICE)
+    ced.copy_rows(output, indices, restored, True)
+    assert torch.equal(scatter_rows(output, indices, 300), restored)
+
+
+def test_ced_row_copy_packed_key_matches_contiguous_sources():
+    from vllm.models.deepseek_v4_1.tilelang import ced
+
+    for tail in [(), (4,), (4, 4), (4, 5120)]:
+        source = torch.empty((3, *tail), device=DEVICE)
+        assert ced.packed_copy_rows_key("float32", tail, True) == ced.copy_rows_key(
+            "float32", tail, source.stride()[1:], source.stride(0), True
+        )
+
+
+def test_ced_row_copy_preconditions():
+    from vllm.models.deepseek_v4_1.tilelang import ced
+
+    indices = torch.zeros(2, dtype=torch.int64, device=DEVICE)
+    rows = torch.zeros((2, 5120), dtype=torch.bfloat16, device=DEVICE)
+    with pytest.raises(ValueError, match="a row to copy"):
+        ced.copy_rows(rows, indices[:0], rows[:0], False)
+    with pytest.raises(ValueError, match="one index"):
+        ced.copy_rows(rows, indices[:1], rows, False)
+    storage = torch.zeros(2 * 5120 + 1, dtype=torch.bfloat16, device=DEVICE)
+    with pytest.raises(ValueError, match="aligned"):
+        ced.copy_rows(storage[1:].view(2, 5120), indices, rows, False)
+    with pytest.raises(ValueError, match="aligned"):
+        ced.copy_rows(rows, indices, storage[1:].view(2, 5120), False)
+    # Element copies have no alignment requirement, and an empty source gathers
+    # zeros.
+    flags = torch.ones(9, dtype=torch.bool, device=DEVICE)
+    ced.copy_rows(flags[1:3], indices, flags[5:7], False)
+    assert flags.all()
+    for dtype in (torch.bool, torch.int32, torch.bfloat16):
+        output = torch.ones(2, dtype=dtype, device=DEVICE)
+        ced.copy_rows(output[:0], indices, output, False)
+        assert not output.any()
 
 
 @pytest.mark.parametrize("lengths", [[], [0], [1], [129], [0, 257, 0, 1], [4096] * 8])
