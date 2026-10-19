@@ -6,14 +6,20 @@ token, with the forward pass untouched. v1 of the candidate (record on the local
 rollback. A read-only review the same day found the rollback unsafe. This record rebuilds the
 correction on the speculative-decoding machinery.
 
-**Done:** vLLM branch `sink-rejection-v2`, one commit on `r6x-candidate` f3b58ed9d (2334b92c0), in
+**Status:** vLLM branch `sink-rejection-v2`, one commit on `r6x-candidate` f3b58ed9d (e1c474dca), in
 ~/projects/vllm-ds41-sink-rejection; the series patch
 [vllm/0221-Sink-detector-and-draft-zero-rejection.patch](vllm/0221-Sink-detector-and-draft-zero-rejection.patch)
 (provisional number 0221, replacing v1's 0221; one patch onto `r6x-candidate` f3b58ed9d).
 The first build (ad9059483, a commit on v1's branch) was cut down the same day without a behaviour
 change; see [Size](#size).
-CPU tests and dgx4's own GPU pass ([runs/tests.txt](runs/tests.txt)). The end-to-end GPU gate is
-planned below and was not run (dgx1-dgx3 are benching). Nothing pushed.
+CPU tests and dgx4's own GPU pass ([runs/tests.txt](runs/tests.txt)). **Screened on the TP3 triangle
+on 2026-10-19 ([Screen](#screen-owner-2026-10-19-a-short-screen-first-then-the-gate)): not
+release-ready.** Speed is r6x's, time to first token grows by one decode step, and the correction
+removes the `Say hi.` / `Thanks!` collapse with every rank flagging the same rows. But the 50,000
+threshold also flags ordinary number tokens: 2 of the screen's 128 greedy responses changed. The
+reference puts those rows at 47,360 and 51,968 with normal predictions, and real sink rows at
+108,000-125,000; the threshold has to move (80,000 is the midpoint candidate) and be surveyed on
+broader text before the gate.
 
 ## What v1 got wrong, and what v2 does instead
 
@@ -124,6 +130,11 @@ so the detector-only and rejection arms share one compiled artifact.
 
 ## The threshold
 
+**Superseded by the screen (below):** the analysis here saw only short chat answers, whose largest
+clean row was 10,688. On longer reasoning text, number tokens (a lone space before digits, `202`)
+reach 47,360-51,968 in the reference with confident, correct predictions, and the engine's own
+numerics put one of them over 50,000. Rows at 115,712-124,416 (prompt words) predict like BOS.
+
 [analysis/sink_column.txt](analysis/sink_column.txt) (v1's reference dumps, extended) and
 [analysis/effort_rows.txt](analysis/effort_rows.txt) ([analysis/effort_rows.py](analysis/effort_rows.py)
 over the 40 runs of the effort-line variants experiment, on a local branch not merged).
@@ -184,6 +195,7 @@ The GPU gate measures the step cost.
 | v2 first build, ad9059483 (on v1's branch) | 5,502 | 2,465 / 74 (30 files) | 1,752 |
 | v2, 7f4c7dc8e (one commit on `r6x-candidate`) | 5,063 | 2,069 / 59 (29 files) | 1,752 |
 | v2, 2334b92c0 (the column capture in the SM120 model) | 5,069 | 2,073 / 59 (29 files) | 1,752 |
+| v2, e1c474dca (warmup rows neither logged nor counted) | 5,126 | 2,083 / 59 (29 files) | 1,791 |
 
 Cut from the first build, with the same tests passing: the flags, the cut and the merge of the
 candidates became torch operations (three Triton kernels and their warmup declarations gone; the
@@ -219,7 +231,8 @@ fail in the image as built.
 
 [screen.json](screen.json) then [probes.json](probes.json), queued into one lab window on the TP3
 triangle. The arms mount the candidate's 29
-changed vLLM files ([overlay/](overlay), vLLM 2334b92c0) over the r6x image, whose tree is the
+changed vLLM files ([overlay/](overlay), now vLLM e1c474dca; the screen ran 2334b92c0) over the r6x
+image, whose tree is the
 candidate's base: every change is Python, so this is the candidate's image.
 
 | Arm | What it is |
@@ -249,7 +262,57 @@ sequence parallelism, per-forward prefill SP, CED row compaction), and leaves th
 untouched. The suites on dgx4 give the same results ([runs/tests.txt](runs/tests.txt)); runs `-screen2`
 and `-probes2` repeat the screen.
 
-## Planned GPU gate (not run: dgx1-dgx3 are benching)
+### Results (runs `-screen2` and `-probes2`, 22:01-23:35 UTC, vLLM 2334b92c0)
+
+Tables: [runs/screen2/](runs/screen2) (screen-tp3, single-stream and logprobs tables, the three
+probe outputs, and the scheduler's flagged events during the repeat arm). Verdicts are against the
+run's own repeat (correction, then correction-again).
+
+| | correction vs r6x | repeat | verdict |
+|---|---|---|---|
+| engine grid, geometric mean of 15 shapes | +0.17% | -0.38% | same |
+| 8 streams, output tok/s | +0.12% | +0.31% | same |
+| one stream, output tok/s | -1.20% (±7.0%) | +0.05% | same |
+| logprobs (5), 1 / 8 streams | -1.49% / -0.10% | -0.04% / -0.03% | same |
+| prefill 32K / 256K | +0.16% / -0.11% | -0.69% / -0.43% | same |
+| time to first token, p50, 1 / 8 streams | 0.124 -> 0.164 s / 0.358 -> 0.462 s | level | one decode step (26.6 and 9.2 steps/s) |
+
+- **Model behaviour (128 prompts, greedy, 8 streams):** 126/128 responses identical to r6x, and the
+  teacher-forced distributions identical everywhere (KL 0): the forward pass is r6x's. The other two
+  diverge at reply tokens 230 and 236, where the correction emitted the second-ranked token (-3.0
+  against -0.23, -2.9 against -0.06). Both repeats of the correction arm give the same text.
+- **They are false positives.** r6x's continuations read normally ("between 1.0 and 2.5 m above
+  chart datum", "2023: 96% contained OSS"). DeepSeek's CPU reference, teacher-forced through r6x's
+  replies ([analysis/false_positive_rows.txt](analysis/false_positive_rows.txt), cases beside it):
+  the flagged rows are a lone space before digits (47,360) and `202` (51,968), each predicting its
+  next digit at -0.52 and -0.04; other number rows in the same replies reach 30,848-39,168. In the
+  prompt, ` the` (effort line) and ` you` reach 124,416 and 115,712 and predict `\n` / `#` / `<`, the
+  BOS-like distribution of the collapse rows (108,032-125,440). The column marks real sinks; 50,000
+  sits inside ordinary text.
+- **During the repeat arm's workloads** ([runs/screen2/flagged-events.txt](runs/screen2/flagged-events.txt)):
+  17 flagged events in about 25 minutes of normal traffic, mostly drafter cuts; the closed loops
+  replay the same prompts, so the same positions recur.
+- **The collapse ([probes](runs/screen2), 16 prompts, thinking high, temperature 0):**
+
+  | prompt | r6x and the detector arm | correction arm (rank check on) |
+  |---|---|---|
+  | `Say hi.` | `Hi! 👋 How can\n` and stop | `Hi! 👋 How's your day going?` (1 draft-zero rejection, 1 draft cut) |
+  | `Thanks!` | `Let me know if there\n there's anything else` | `Let me know if you need anything else — happy to help.` (1 rejection) |
+  | `ok` | `e\n first message` in the reasoning | clean reasoning, `Got it — what would you like help with?` (1 rejection, 3 cuts) |
+
+  The other 13 answers are byte-identical to r6x on both candidate arms, unflagged; the detector arm
+  is byte-identical to r6x on all 16 and flags the same three prompts.
+- **Ranks agree:** `VLLM_SINK_DETECTOR_CHECK_RANKS=1` never raised, and every rank's log line read the
+  same counts (correction 9 rows, detector 5). The scheduler counted 2 draft-zero rows fewer on both
+  arms: most likely in-flight async steps of requests that had already ended (their outputs are
+  dropped), not yet verified.
+- **Boots** 90.9-92.8 s, as r6x's 89.8-92.0 s.
+- **Startup log lines:** the warmup's synthetic requests hold token 0, DeepSeek V4.1's BOS, as draft
+  zero, so each warmup pass logged flagged rows before the server was ready; the counts were reset,
+  but the last line before the reset stayed. vLLM e1c474dca keeps the warmup silent (`warming`, then
+  `end_warmup()`), with a GPU test; overlays and patch carry it.
+
+## Planned GPU gate (waits for a new threshold and its survey)
 
 Build the image from the series with this 0221, then one lab window on the TP3 triangle with three
 arms: **r6x**, **detector** (`VLLM_SINK_DETECTOR_COLUMN=2455`) and **correction** (also
@@ -294,6 +357,13 @@ conversion) are read from item 1's engine grid. The first boot with the detector
 column is part of the compile cache key.
 
 ## Open
+
+- **The threshold.** 50,000 flags ordinary number tokens (above). Next: a survey of high rows on
+  longer, varied text (a debug log of each flagged row's value on a detector-only arm, or more
+  reference runs), then a threshold between the largest normal row and the smallest sink row
+  (80,000 sits midway in today's data), then the gate.
+- The per-rank counts read 2 draft-zero rows more than the scheduler's on both probe arms; check that
+  they are the discarded in-flight steps of finished requests.
 
 - **Cross-rank agreement is an assumption.** Every rank computes the flags from its own copy of the
   residual and decides the same rows only if the copies agree bit for bit after the all-reduces (or no
