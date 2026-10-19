@@ -18,7 +18,7 @@ from typing import Any
 
 TREE = sys.argv[1]
 SOURCES = {
-    "vllm/models/deepseek_v4_1/ced.py": {"CED_WINDOW", "_KEEP_ALL", "CEDPlan", "plan_ced", "nonfinal_limits"},
+    "vllm/models/deepseek_v4_1/ced.py": {"CED_WINDOW", "KEEP_ALL", "CEDPlan", "plan_ced", "nonfinal_limits"},
     "vllm/v1/attention/backends/mla/compressor_utils.py": {"_DSPARK_SWA_INDEX_ALIGNMENT", "get_dspark_swa_index_width"},
     "vllm/models/deepseek_v4_1/nvidia/model_state.py": {"_nonfinal_skip_policy", ("DeepseekV41ModelState", "_stage_ced")},
     "vllm/v1/core/sched/scheduler.py": {("Scheduler", "_aligned_prefill_chunk")},
@@ -64,7 +64,7 @@ class FakeCEDState:
             assert unlimited is not None and plan.max_query_len == unlimited.max_query_len
         self.out = []
         for i, q in enumerate(query_lengths):
-            limit = ns["_KEEP_ALL"] if keep_full[i] else W if limits is None else limits[i]
+            limit = ns["KEEP_ALL"] if keep_full[i] else W if limits is None else limits[i]
             kept = min(int(q), limit)
             replay = max(prefix_start[i], seq[i] - kept if q > kept else 0)
             self.out.append((kept, replay))

@@ -1,18 +1,29 @@
-From 54c4fb11aaac35eeabe086d23e1a7491e108f716 Mon Sep 17 00:00:00 2001
+From 3e5e91c31d905e3dc71946e215dadf856e6cbaaf Mon Sep 17 00:00:00 2001
 From: Christopher Owen <3221756+christopherowen@users.noreply.github.com>
 Date: Mon, 19 Oct 2026 09:35:15 +0200
-Subject: [PATCH] CED skip: require aligned successors and stop on shortened
- chunks
+Subject: [PATCH] CED skip: keep one decoder row of unread nonfinal chunks,
+ stop on shortened successors
 
-Experimental CPU preparation. Require aligned TileLang chunked prefill with DSpark and a threshold covering the complete target and draft replay reach. Multimodal requests remain ineligible. Retain only the last decoder row of eligible nonfinal chunks, and require the promised next chunk before staging any GPU work. No replay floor, environment knob, or fallback. CPU dependency fingerprints and fault injection pass; GPU and full-model gates are pending, and runtime integration awaits the pure TileLang ports.
+An eligible prefill chunk that is truncated anyway, ends on the scheduler's
+aligned chunk boundary and is followed by at least the replay reach of prefill
+rows keeps only its last decoder row, whose logits the runner discards; no
+later decoder or draft window reaches back into it. nonfinal_limits computes
+the per-request kept-row limits the TileLang requests kernel takes, and
+plan_ced keeps the window bound as the decoder's maximum query length.
+
+Startup requires TileLang, aligned chunked prefill, DSpark and a chunk
+threshold covering the target and draft replay reach (199 rows at k=5), and
+raises otherwise. Multimodal requests are ineligible. A skipped chunk records
+its promised successor, and a changed or shortened successor raises before any
+metadata or GPU work: no replay floor, environment switch or fallback.
 ---
- .../attention/test_b12x_v41_ced_metadata.py   | 142 ++++++++++++++++++
- vllm/models/deepseek_v4_1/ced.py              |  89 +++++++++--
- .../deepseek_v4_1/nvidia/model_state.py       | 123 +++++++++++++--
- 3 files changed, 324 insertions(+), 30 deletions(-)
+ .../attention/test_b12x_v41_ced_metadata.py   | 151 +++++++++++++++++-
+ vllm/models/deepseek_v4_1/ced.py              |  72 ++++++++-
+ .../deepseek_v4_1/nvidia/model_state.py       | 123 ++++++++++++--
+ 3 files changed, 323 insertions(+), 23 deletions(-)
 
 diff --git a/tests/v1/attention/test_b12x_v41_ced_metadata.py b/tests/v1/attention/test_b12x_v41_ced_metadata.py
-index 76241de27..3a8af26d0 100644
+index e4705cf83..cae9bfc1e 100644
 --- a/tests/v1/attention/test_b12x_v41_ced_metadata.py
 +++ b/tests/v1/attention/test_b12x_v41_ced_metadata.py
 @@ -12,6 +12,7 @@ from vllm.models.deepseek_v4_1.ced import (
@@ -192,20 +203,49 @@ index 76241de27..3a8af26d0 100644
  @cuda
  @pytest.mark.parametrize("transpose", [False, True])
  def test_packing_trailing_dimensions_invalid_rows_and_scatter(transpose):
+@@ -447,6 +589,8 @@ def test_streaming_update_preserves_private_decoder_history(monkeypatch):
+     state.ced_state, starts, seq = _state([1], [1025])
+     state._ced_prompt_logprobs = set()
+     state._ced_prefix_start = {"stream": 256}
++    state._ced_skip_min_rows, state._ced_chunk_align = 0, 0
++    state._ced_mm_requests, state._ced_expected_chunk = set(), {}
+     state.disk_engram_models, state._prefill_tokens = (), {}
+     batch = SimpleNamespace(
+         num_reqs=1,
+@@ -456,7 +600,10 @@ def test_streaming_update_preserves_private_decoder_history(monkeypatch):
+         num_scheduled_tokens=np.array([1]),
+     )
+     updated = SimpleNamespace(
+-        req_id="stream", num_computed_tokens=1024, sampling_params=None
++        req_id="stream",
++        num_computed_tokens=1024,
++        sampling_params=None,
++        mm_features=[],
+     )
+     state.prepare_streaming_update("stream")
+     state.remove_request("stream")
+@@ -482,6 +629,8 @@ def test_large_full_capture_decodes_small_live_prefix(monkeypatch):
+     state.ced_state, starts, seq = _state([256])
+     state._ced_prompt_logprobs = set()
+     state._ced_prefix_start = {}
++    state._ced_skip_min_rows, state._ced_chunk_align = 0, 0
++    state._ced_mm_requests, state._ced_expected_chunk = set(), {}
+     state.lookback_token_ids = None
+     state.disk_engram_models = ()
+     state.device = torch.device("cuda")
 diff --git a/vllm/models/deepseek_v4_1/ced.py b/vllm/models/deepseek_v4_1/ced.py
-index 289561bee..300bbd4ef 100644
+index 85e2c06c8..9dc2a2331 100644
 --- a/vllm/models/deepseek_v4_1/ced.py
 +++ b/vllm/models/deepseek_v4_1/ced.py
-@@ -22,6 +22,8 @@ if TYPE_CHECKING:
+@@ -17,6 +17,7 @@ if TYPE_CHECKING:
      from .sparse_mla import DeepseekV41B12xMetadata
  
  CED_WINDOW = 128
 +# The kept-row limit of a request that keeps every row (prompt logprobs, capture).
-+_KEEP_ALL = 2**31 - 1
+ KEEP_ALL = 2**31 - 1
  
  
- def ced_decoder_start(hf_config: Any) -> int | None:
-@@ -181,27 +183,78 @@ class CEDPlan:
+@@ -74,22 +75,73 @@ class CEDPlan:
      keep_full: tuple[bool, ...]
  
  
@@ -280,44 +320,10 @@ index 289561bee..300bbd4ef 100644
 +    return limits if skipped else None
 +
 +
- @triton.jit(do_not_specialize=["nr"])
- def _decoder_requests(
-     Starts,
-     Seq,
--    KeepFull,
-+    Limits,
-     PrefixStart,
-     OutStarts,
-     RequestPositions,
-@@ -210,16 +263,15 @@ def _decoder_requests(
-     nr,
-     R: tl.constexpr,
-     B: tl.constexpr,
--    WINDOW: tl.constexpr,
- ):
-     r = tl.arange(0, B)
-     valid = r < nr
-     start = tl.load(Starts + r, valid, other=0)
-     end = tl.load(Starts + r + 1, valid, other=0)
-     seq = tl.load(Seq + r, valid, other=0).to(tl.int64)
--    full = tl.load(KeepFull + r, valid, other=0)
-+    limit = tl.load(Limits + r, valid, other=0)
-     q = end - start
--    kept = tl.where(full, q, tl.minimum(q, WINDOW))
-+    kept = tl.minimum(q, limit)
-     cumulative = tl.cumsum(kept)
-     count = tl.sum(kept)
-     tl.store(OutStarts + r, tl.where(valid, cumulative - kept, count), r <= R)
-@@ -269,7 +321,7 @@ class CEDState:
-         )
-         self.replay_start = torch.empty_like(self.request_positions)
-         self.counts = torch.empty(2, dtype=torch.int32, device=device)
--        self.keep_full = torch.empty(max_requests, dtype=torch.bool, device=device)
-+        self.limits = torch.empty(max_requests, dtype=torch.int32, device=device)
-         self.prefix_start = torch.empty_like(self.request_positions)
-         self.plan: CEDPlan | None = None
+ class CEDState:
+     """Stable per-model staging buffers shared by dummy, capture, and runtime."""
  
-@@ -316,23 +368,31 @@ class CEDState:
+@@ -178,14 +230,20 @@ class CEDState:
          query_lengths,
          keep_full,
          prefix_start,
@@ -329,39 +335,18 @@ index 289561bee..300bbd4ef 100644
 +        self.plan = plan_ced(query_lengths, keep_full, self.capacities, limits)
          # Fresh pinned sources remain owned by the async-copy allocator until
          # transfer completion; reusing a CPU staging buffer could race overlap.
--        keep_host = torch.tensor(
--            keep_full, dtype=torch.bool, device="cpu", pin_memory=True
-+        limit_host = torch.tensor(
+-        # A request keeps at most its limit of rows: all of them, or the window.
++        # A request keeps at most its limit of rows: all of them, the window, or
++        # its nonfinal limit.
+         limits_host = torch.tensor(
+-            [KEEP_ALL if full else CED_WINDOW for full in keep_full],
 +            [
-+                _KEEP_ALL if full else CED_WINDOW if limits is None else limits[i]
++                KEEP_ALL if full else CED_WINDOW if limits is None else limits[i]
 +                for i, full in enumerate(keep_full)
 +            ],
-+            dtype=torch.int32,
-+            device="cpu",
-+            pin_memory=True,
-         )
-         prefix_host = torch.tensor(
-             prefix_start, dtype=torch.int64, device="cpu", pin_memory=True
-         )
--        self.keep_full[:nr].copy_(keep_host, non_blocking=True)
-+        self.limits[:nr].copy_(limit_host, non_blocking=True)
-         self.prefix_start[:nr].copy_(prefix_host, non_blocking=True)
-         _decoder_requests[(1,)](
-             starts,
-             seq,
--            self.keep_full,
-+            self.limits,
-             self.prefix_start,
-             self.starts,
-             self.request_positions,
-@@ -341,7 +401,6 @@ class CEDState:
-             nr,
-             self.max_requests,
-             triton.next_power_of_2(self.max_requests + 1),
--            CED_WINDOW,
-         )
-         if self.plan is not None:
-             _decoder_indices[(triton.cdiv(self.plan.capacity, 128),)](
+             dtype=torch.int32,
+             device="cpu",
+             pin_memory=True,
 diff --git a/vllm/models/deepseek_v4_1/nvidia/model_state.py b/vllm/models/deepseek_v4_1/nvidia/model_state.py
 index 155b13ef0..382dd689e 100644
 --- a/vllm/models/deepseek_v4_1/nvidia/model_state.py
