@@ -1,9 +1,8 @@
 # Sink rejection v2: each step's last sampled token is verified as draft zero
 
 Owner, 2026-10-19: one release carrying both the sink detector and a correct correction of a sunk
-token, with the forward pass untouched. v1 of the candidate,
-[2026-10-19-sink-rejection](../2026-10-19-sink-rejection/README.md) on branch `sink-rejection`
-(patch 0221, vLLM 82eff9023), detected sunk rows and replaced a sunk *committed* token with a custom
+token, with the forward pass untouched. v1 of the candidate (record on the local branch
+`sink-rejection`, never merged; patch 0221, vLLM 82eff9023) detected sunk rows and replaced a sunk *committed* token with a custom
 rollback. A read-only review the same day found the rollback unsafe. This record rebuilds the
 correction on the speculative-decoding machinery.
 
@@ -127,7 +126,7 @@ so the detector-only and rejection arms share one compiled artifact.
 
 [analysis/sink_column.txt](analysis/sink_column.txt) (v1's reference dumps, extended) and
 [analysis/effort_rows.txt](analysis/effort_rows.txt) ([analysis/effort_rows.py](analysis/effort_rows.py)
-over the 40 runs of [2026-10-19-effort-line-variants](../2026-10-19-effort-line-variants/README.md)).
+over the 40 runs of the effort-line variants experiment, on a local branch not merged).
 The detector reads `|residual[2455]|` after the last layer, at the sampled rows only: the last prompt
 row and every generated token's row.
 
@@ -215,6 +214,28 @@ The 80 failures and errors are the same tests on the untouched image ([runs/offl
 73 offline (no tokenizer or uncached model configs), 2 async tests without pytest-asyncio, and 5 that
 fail in the image as built.
 
+## Screen (owner, 2026-10-19: a short screen first, then the gate)
+
+[screen.json](screen.json), one lab window on the TP3 triangle. The arms mount the candidate's 29
+changed vLLM files ([overlay/](overlay), vLLM 7f4c7dc8e) over the r6x image, whose tree is the
+candidate's base: every change is Python, so this is the candidate's image.
+
+| Arm | What it is |
+|---|---|
+| [r6x-dev.json](r6x-dev.json) | production TP3 (r6x at 1M) with the dev-mode RPC for the engine grid |
+| [correction-dev.json](correction-dev.json) | r6x-dev with the overlay, detector and rejection on |
+| [detector.json](detector.json) | production with the overlay and the detector alone |
+| [correction-ranks.json](correction-ranks.json) | production with the overlay, rejection on and `VLLM_SINK_DETECTOR_CHECK_RANKS=1` |
+
+1. **Speed and identity** (gate items 1, 5, 8 in short): the `screen-tp3` suite with the companion
+   suites `single-stream` and [logprobs.json](logprobs.json) (closed loops at 1 and 8 streams with
+   five top logprobs) on correction, r6x, correction again. The screen's model step scores each
+   arm's text against the first arm's; the correction arm's must equal r6x's (no prompt there
+   collapses). Single-stream gives time to first token.
+2. **The collapse and the ranks** (gate items 2 and 6): [probes.py](probes.py) on correction-ranks,
+   detector and r6x: the 16 answers, `usage.sink_rejection`, the `vllm:sink_*` counters and each
+   rank's detector log line.
+
 ## Planned GPU gate (not run: dgx1-dgx3 are benching)
 
 Build the image from the series with this 0221, then one lab window on the TP3 triangle with three
@@ -227,11 +248,11 @@ arms: **r6x**, **detector** (`VLLM_SINK_DETECTOR_COLUMN=2455`) and **correction*
    kernels the correction arm keeps), and `vllm:sink_flagged_rows` read from `/metrics` must be 0
    after each candidate arm. The engine grid gives the step cost of each arm; the budget is the
    release noise.
-2. **The collapse.** `probes/mitigate.py` of the thinking-collapse experiment at temperature 0,
-   thinking high, against the correction arm. `Say hi.` and `Thanks!` must show
+2. **The collapse.** [probes.py](probes.py) (the thinking-collapse experiment's 16 prompts) at
+   temperature 0, thinking high, against the correction arm. `Say hi.` and `Thanks!` must show
    `usage.sink_rejection.flagged_draft_zero >= 1` (or a draft cut) and a clean answer (no
    `How can\n can`, no `there\n there's`, no `<ds_safety>`). The other 14 prompts must be byte-identical
-   to `runs/production/mitigate-r6x-tp3.txt` with zero flags. On the detector arm the same two prompts
+   to the r6x arm's answers with zero flags. On the detector arm the same two prompts
    must flag and collapse as r6x does.
 3. **Concurrent batch.** `Say hi.` and `Thanks!` interleaved with the other 14 prompts at c16, staggered
    arrivals, on the correction arm. The collapsing pair is clean, the other 14 equal their c1 answers on

@@ -1,0 +1,60 @@
+{
+ "experiment": "experiments/2026-10-19-sink-rejection-v2",
+ "run": "sink-rejection-v2-screen",
+ "jobs": [
+  {
+   "kind": "sync"
+  },
+  {
+   "kind": "measure",
+   "suite": [
+    "screen-tp3",
+    "single-stream",
+    "experiments/2026-10-19-sink-rejection-v2/logprobs.json"
+   ],
+   "arms": [
+    {
+     "config": "correction-dev.json",
+     "label": "correction"
+    },
+    {
+     "config": "r6x-dev.json",
+     "label": "r6x"
+    },
+    {
+     "config": "correction-dev.json",
+     "label": "correction-again"
+    }
+   ]
+  },
+  {
+   "kind": "measure",
+   "bench": false,
+   "bracket": false,
+   "extras": [
+    [
+     "probes.py",
+     [
+      "--nodes",
+      "dgx1,dgx2,dgx3"
+     ],
+     "probes"
+    ]
+   ],
+   "arms": [
+    {
+     "config": "correction-ranks.json",
+     "label": "correction-ranks"
+    },
+    {
+     "config": "detector.json",
+     "label": "detector"
+    },
+    {
+     "config": "r6x-dev.json",
+     "label": "r6x"
+    }
+   ]
+  }
+ ]
+}
