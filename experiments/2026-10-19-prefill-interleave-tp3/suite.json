@@ -1,7 +1,7 @@
 {
  "name": "prefill-interleave-tp3",
  "version": 1,
- "description": "What seven decoding streams wait while a cold 131K prompt prefills, and that prompt's rate under them.",
+ "description": "What seven decoding streams wait while a cold 131K prompt prefills, and that prompt's rate under them; ten repeats, so the tail (worst wait, p99 step) has an interval worth reading.",
  "steps": [
   {
    "id": "stall",
@@ -14,7 +14,7 @@
     "max_tokens": 16384,
     "warmup": 20,
     "tail": 2,
-    "repeats": 3
+    "repeats": 10
    }
   }
  ]

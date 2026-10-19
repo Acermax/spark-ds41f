@@ -15,7 +15,8 @@ slows by about (N-1) x 0.1 s a chunk.
 Arms, the gates' skip overlays on production r6x TP3 at 1M: intervals 1, 2 and 3 at the
 budgets 4,096 and 8,192, then 4,096 at interval 1 again (the repeat).
 - `interleave.json`: `suite.json`, the stall of seven decoding streams during a cold 131K
-  prefill and that prefill's rate under them, three repeats per arm.
+  prefill and that prefill's rate under them, ten repeats per arm (three left the worst
+  wait and p99 step unresolved in the budget sweep).
 - `determinism.json`: outputs at intervals 2 (4,096) and 3 (8,192), 700- and 2,200-line
   long prompts, must equal the skip's (62313cb5 / 9742ac2c and 62313cb5 / f6171075):
   interleaving moves decode rows between steps, and the mixed scenarios put them beside
