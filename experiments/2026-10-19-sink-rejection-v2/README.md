@@ -7,10 +7,12 @@ token, with the forward pass untouched. v1 of the candidate,
 rollback. A read-only review the same day found the rollback unsafe. This record rebuilds the
 correction on the speculative-decoding machinery.
 
-**Done:** vLLM branch `sink-rejection-v2` (off `sink-rejection`), commit ad9059483, in
+**Done:** vLLM branch `sink-rejection-v2`, one commit on `r6x-candidate` f3b58ed9d (7f4c7dc8e), in
 ~/projects/vllm-ds41-sink-rejection; the series patch
 [vllm/0221-Sink-detector-and-draft-zero-rejection.patch](vllm/0221-Sink-detector-and-draft-zero-rejection.patch)
 (provisional number 0221, replacing v1's 0221; one patch onto `r6x-candidate` f3b58ed9d).
+The first build (ad9059483, a commit on v1's branch) was cut down the same day without a behaviour
+change; see [Size](#size).
 CPU tests and dgx4's own GPU pass ([runs/tests.txt](runs/tests.txt)). The end-to-end GPU gate is
 planned below and was not run (dgx1-dgx3 are benching). Nothing pushed.
 
@@ -18,10 +20,10 @@ planned below and was not run (dgx1-dgx3 are benching). Nothing pushed.
 
 | v1 (0221) | v2 |
 |---|---|
-| **Never ran in production.** The recipe sets `VLLM_USE_V2_MODEL_RUNNER=1`, and DSpark, block verification and adaptive verification exist only in the V2 runner (`vllm/v1/worker/gpu/`). 0221 changed the V1 runner (`gpu_model_runner.py`, `vllm/v1/sample/rejection_sampler.py`) and listed the V2 runner under "not covered". | Built on the V2 runner: its sampler, rejection sampler, greedy verification from vocabulary shards, DSpark/DFlash inputs and request state. The V1 runner refuses the detector at startup. |
+| **Never ran in production.** The recipe sets `VLLM_USE_V2_MODEL_RUNNER=1`, and DSpark, block verification and adaptive verification exist only in the V2 runner (`vllm/v1/worker/gpu/`). 0221 changed the V1 runner (`gpu_model_runner.py`, `vllm/v1/sample/rejection_sampler.py`) and listed the V2 runner under "not covered". | Built on the V2 runner: its sampler, rejection sampler, greedy verification from vocabulary shards, DSpark/DFlash inputs and request state. The V1 runner is untouched; the detector needs the V2 runner, which the recipe sets (not enforced). |
 | A zero-draft async step left the sink token's KV in place (`update_num_computed_tokens_for_batch_change` applied the correction only with drafts). | No rollback exists. The sunk token was never committed: it is draft zero of the next step, and a rejected draft zero rolls back with the rejected-draft accounting (the scheduler takes `len(spec)` off its computed count; the worker's computed count does not advance). |
 | A rolled-back request's drafts scattered into the neighbouring request's slot and wrote its MTP KV at wrong positions (`clamp(min=0)` covered request 0 only). | A request with no valid row anchors its drafter query at draft zero's own position and writes no context KV (`prepare_dflash_inputs`); tested with the rejected request in the middle of a batch. |
-| No cross-rank agreement on the flags. | Settings all-gathered and compared at startup. Flags: an open assumption (below) with a lab assertion, `VLLM_SINK_DETECTOR_CHECK_RANKS=1`, and per-rank flag counts in each worker's log. |
+| No cross-rank agreement on the flags. | Settings come from the same environment on every rank. Flags: an open assumption (below) with a lab assertion, `VLLM_SINK_DETECTOR_CHECK_RANKS=1`, and per-rank flag counts in each worker's log. |
 | The frontend hold-back was decided by the API-server process's environment (duplicate output when unset, assertion when set and nothing held). | No frontend change: the scheduler emits committed tokens only. |
 | A stale (preempted, in-flight) output's rollback appended without popping. | A stale output commits its verified tokens and drops the held one; the resumed request draws that position again. Tested under KV pressure with async scheduling. |
 | The replacement's logprob came from the sunk row's distribution. | The replacement carries its own logprob and rank in the draw that produced the replaced token, with that draw's top-k. |
@@ -86,8 +88,10 @@ are decoding. Everything else is the existing machinery:
   zero.
 
 **Where it lives.** `vllm/v1/sample/sink.py`: configuration and the host form of the events.
-`vllm/v1/worker/gpu/sample/sink.py`: five Triton kernels (flags, cut, candidates, merge, policy), each
-registered for the startup warmup, and the per-slot state. The policy is one kernel per step. It
+`vllm/v1/worker/gpu/sample/sink.py`: two Triton kernels, registered for the startup warmup (the
+candidates of each request's last draw, and the policy); the flags, the cut and the merge of the
+candidates are a few sync-free torch operations; and the per-slot state. The policy is one kernel per
+step. It
 applies the draft-zero rule, takes the new alternates, writes the host tokens with draft zero in front,
 takes a rejected draft zero out of the request state (`total_len - 1`, its bin count), sets
 `num_rejected` to the request's row count, and writes one event record per request. The runner calls
@@ -162,7 +166,7 @@ sampled, and its flag is ignored.
 
 The GPU gate measures the step cost.
 
-## Change (vLLM, 30 files; tests 2 new files)
+## Change (vLLM, 29 files; tests 2 new files)
 
 | Area | Files |
 |---|---|
@@ -171,8 +175,25 @@ The GPU gate measures the step cost.
 | V2 runner | `worker/gpu/sample/sink.py` (new), `model_runner.py`, `sample/sampler.py`, `sample/gumbel.py` (`gumbel_noised_scores`, the argmax unchanged), `sample/output.py`, `spec_decode/rejection_sampler.py`, `spec_decode/dflash/speculator.py` (zero valid rows), `async_utils.py`, `warmup.py` (warmup steps carry draft zero; counts reset after) |
 | scheduler | `core/sched/scheduler.py`, `async_scheduler.py`, `output.py`, `utils.py`, `request.py`, `structured_output/__init__.py` |
 | surfaces | `v1/metrics/stats.py`, `loggers.py`, `v1/engine/__init__.py`, `output_processor.py`, `outputs.py`, `v1/outputs.py`, `entrypoints/...` |
-| V1 runner | `gpu_model_runner.py`: refuses the detector |
 | removed from 0221 | the V1 runner and V1 sampler changes, the frontend hold-back, `rollback_output_tokens` and the prefix-cache forget, the grammar rewind, the sync-mode event copies, 0221's three test files |
+
+## Size
+
+| | patch lines | source (+/-) | tests (+) |
+|---|---|---|---|
+| v1, 82eff9023 | 3,436 | 1,487 / 34 (26 files) | 853 |
+| v2 first build, ad9059483 (on v1's branch) | 5,502 | 2,465 / 74 (30 files) | 1,752 |
+| v2, 7f4c7dc8e (one commit on `r6x-candidate`) | 5,063 | 2,069 / 59 (29 files) | 1,752 |
+
+Cut from the first build, with the same tests passing: the flags, the cut and the merge of the
+candidates became torch operations (three Triton kernels and their warmup declarations gone; the
+worker's `sink.py` 1,050 to 771 lines); the V1 runner is untouched (its startup refusal went); the
+startup comparison of the settings across tensor-parallel ranks went (every rank reads the same
+environment; the lab flag check stays); `check_stop` is no longer refactored (`stops_on_next_token`
+is a 12-line helper beside it); one scheduler log line per sink event; the held token's logprobs are
+one row table per request. v2 stays larger than v1 because draft zero is scheduled and accounted in
+both schedulers, the policy and the Gumbel-replay alternates run on the device, and its tests drive
+the real kernels.
 
 ## Tests run
 

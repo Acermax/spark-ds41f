@@ -1,15 +1,14 @@
-From 9050207247acf1e53e57846551103a55bdea0849 Mon Sep 17 00:00:00 2001
+From 7f4c7dc8e2afdbff759dc9717c49b4cf903a4cd7 Mon Sep 17 00:00:00 2001
 From: Christopher Owen <3221756+christopherowen@users.noreply.github.com>
-Date: Mon, 19 Oct 2026 22:31:36 +0200
-Subject: [PATCH] Sink detector and draft-zero rejection: never commit a token
- sampled from a sunk row
+Date: Mon, 19 Oct 2026 22:59:13 +0200
+Subject: [PATCH] Sink detector and draft-zero rejection: verify each step's
+ last sampled token as draft zero of the next
 
 A generated token can turn into an attention sink (DeepSeek V4.1 Flash: the residual's
 column 2455 runs away from layer 20 on, to 1.1e5-1.3e5 by the last layer), and the row's
 next-token distribution becomes document-start noise: `How can\n can I help`. The forward
-pass is the model's own, so this is a decoding policy, built on the V2 model runner (the
-recipe runs VLLM_USE_V2_MODEL_RUNNER=1) and on the speculative-decoding machinery. (The
-series' earlier 0221 candidate, a custom rollback on the V1 runner, is superseded.)
+pass is the model's own, so this is a decoding policy, on model runner V2 (the runner the
+DSpark recipe uses; the V1 runner is untouched).
 
 With VLLM_SINK_REJECTION=1 the last token a step samples is not committed. The scheduler
 holds it as the request's provisional token and schedules it as draft zero of the next
@@ -30,27 +29,25 @@ row that verifies it before the kernels run, and restored before logprobs. The a
 are kept per request slot on the device; on the all-greedy fast path each rank's top
 candidates of the last rows are gathered (8 floats a request). A request whose draft zero
 was rejected has no valid row: DSpark/DFlash anchor its replacement at draft zero's position.
-The policy is one Triton kernel a step and takes a rejected draft zero out of the request
-state before the update appends its replacement. FlashInfer sampling stays on with
-rejection off.
+The candidates of each draw and the policy are one Triton kernel each; the policy takes a
+rejected draft zero out of the request state before the update appends its replacement.
+The flags, the cut and the merge of the candidates are sync-free torch operations.
+FlashInfer sampling stays on with rejection off.
 
-The detector reads the watched column of each residual stream, which the model now keeps
-as [tokens, 4] float32 (get_sink_residual_columns) instead of the drafter's full residual
-buffer, whose allocation changed the sequence-parallel gather. Default threshold 50000:
-sunk sampled rows 108,032-125,440, clean ones at most 10,688 on the CPU reference; 1e4 had
-no margin. Dead verification rows are not flagged. Settings are compared across
-tensor-parallel ranks at startup; VLLM_SINK_DETECTOR_CHECK_RANKS=1 checks the flags every
+The detector reads the watched column of each residual stream, which the model keeps as
+[tokens, 4] float32 (get_sink_residual_columns). Default threshold 50000: sunk sampled rows
+108,032-125,440, clean ones at most 10,688 on the CPU reference. Dead verification rows are
+not flagged. VLLM_SINK_DETECTOR_CHECK_RANKS=1 checks the tensor-parallel ranks' flags every
 step (lab only). The sampling-only settings stay out of the compile cache key.
 
 Surfaced as vllm:sink_flagged_rows{row=draft_zero|drafter|prompt},
 vllm:sink_draft_zero_rejections, vllm:sink_draft_cuts, vllm:sink_fallthroughs, the periodic
 stats line, a scheduler log line per event, per-rank counts in each worker's log, and
-usage.sink_rejection on every response with the detector on (its sink_metrics now reach
-CompletionOutput). The V1 runner refuses the detector; the V2 runner refuses rejection with
-the features it does not handle (pipeline parallelism, batch-sharded sampling, PCP, DBO,
-other drafters, probabilistic drafts, watermarking, sampling masks, trace replay, routed
-experts, KV transfer, boundary checkpoints). The warmup's synthetic decode steps carry draft
-zero, and its flags are not counted.
+usage.sink_rejection on every response with the detector on. The V2 runner refuses
+rejection with the features it does not handle (pipeline parallelism, batch-sharded
+sampling, PCP, DBO, other drafters, probabilistic drafts, watermarking, sampling masks,
+trace replay, routed experts, KV transfer, boundary checkpoints). The warmup's synthetic
+decode steps carry draft zero, and its flags are not counted.
 
 Tests: the scheduler and frontend with a scripted worker (sync and async: the collapse
 sequence by draft-zero rejection and by drafter cut, fallthrough, a rejection in the middle
@@ -63,39 +60,38 @@ rejection sampler (greedy and random, block verification) with its batch neighbo
 unchanged. The tokenizer, parser, sampling, verification, drafter-input and scheduler
 suites fail exactly where the untouched image fails offline.
 ---
- tests/v1/core/test_sink_draft_zero.py         |  912 ++++++++++++++
- tests/v1/worker/test_gpu_sink.py              |  840 +++++++++++++
- vllm/entrypoints/generate/base/serving.py     |   23 +-
- .../openai/chat_completion/serving.py         |    3 +
- vllm/entrypoints/openai/completion/serving.py |    3 +
- vllm/entrypoints/serve/engine/protocol.py     |   16 +
- vllm/envs.py                                  |   39 +
- vllm/models/deepseek_v41/nvidia/model.py      |   26 +
- vllm/models/deepseek_v41/nvidia/vl_model.py   |    4 +
- vllm/outputs.py                               |    9 +-
- vllm/v1/core/sched/async_scheduler.py         |   38 +-
- vllm/v1/core/sched/output.py                  |    5 +
- vllm/v1/core/sched/scheduler.py               |  347 +++++-
- vllm/v1/core/sched/utils.py                   |   65 +-
- vllm/v1/engine/__init__.py                    |    5 +
- vllm/v1/engine/output_processor.py            |    7 +
- vllm/v1/metrics/loggers.py                    |   76 ++
- vllm/v1/metrics/stats.py                      |   67 ++
- vllm/v1/outputs.py                            |    5 +
- vllm/v1/request.py                            |   21 +-
- vllm/v1/sample/sink.py                        |  164 +++
- vllm/v1/structured_output/__init__.py         |   16 +-
- vllm/v1/worker/gpu/async_utils.py             |   35 +-
- vllm/v1/worker/gpu/model_runner.py            |  308 ++++-
- vllm/v1/worker/gpu/sample/gumbel.py           |   32 +-
- vllm/v1/worker/gpu/sample/output.py           |    9 +-
- vllm/v1/worker/gpu/sample/sampler.py          |   31 +
- vllm/v1/worker/gpu/sample/sink.py             | 1050 +++++++++++++++++
- .../gpu/spec_decode/dflash/speculator.py      |    9 +-
- .../gpu/spec_decode/rejection_sampler.py      |   97 +-
- vllm/v1/worker/gpu/warmup.py                  |   22 +-
- vllm/v1/worker/gpu_model_runner.py            |    7 +
- 32 files changed, 4217 insertions(+), 74 deletions(-)
+ tests/v1/core/test_sink_draft_zero.py         | 912 ++++++++++++++++++
+ tests/v1/worker/test_gpu_sink.py              | 840 ++++++++++++++++
+ vllm/entrypoints/generate/base/serving.py     |  23 +-
+ .../openai/chat_completion/serving.py         |   3 +
+ vllm/entrypoints/openai/completion/serving.py |   3 +
+ vllm/entrypoints/serve/engine/protocol.py     |  16 +
+ vllm/envs.py                                  |  39 +
+ vllm/models/deepseek_v41/nvidia/model.py      |  26 +
+ vllm/models/deepseek_v41/nvidia/vl_model.py   |   4 +
+ vllm/outputs.py                               |   9 +-
+ vllm/v1/core/sched/async_scheduler.py         |  38 +-
+ vllm/v1/core/sched/output.py                  |   5 +
+ vllm/v1/core/sched/scheduler.py               | 311 +++++-
+ vllm/v1/core/sched/utils.py                   |  14 +
+ vllm/v1/engine/__init__.py                    |   5 +
+ vllm/v1/engine/output_processor.py            |   7 +
+ vllm/v1/metrics/loggers.py                    |  76 ++
+ vllm/v1/metrics/stats.py                      |  67 ++
+ vllm/v1/outputs.py                            |   5 +
+ vllm/v1/request.py                            |  21 +-
+ vllm/v1/sample/sink.py                        | 164 ++++
+ vllm/v1/structured_output/__init__.py         |  16 +-
+ vllm/v1/worker/gpu/async_utils.py             |  35 +-
+ vllm/v1/worker/gpu/model_runner.py            | 270 +++++-
+ vllm/v1/worker/gpu/sample/gumbel.py           |  32 +-
+ vllm/v1/worker/gpu/sample/output.py           |   9 +-
+ vllm/v1/worker/gpu/sample/sampler.py          |  31 +
+ vllm/v1/worker/gpu/sample/sink.py             | 771 +++++++++++++++
+ .../gpu/spec_decode/dflash/speculator.py      |   9 +-
+ .../gpu/spec_decode/rejection_sampler.py      |  97 +-
+ vllm/v1/worker/gpu/warmup.py                  |  22 +-
+ 31 files changed, 3821 insertions(+), 59 deletions(-)
  create mode 100644 tests/v1/core/test_sink_draft_zero.py
  create mode 100644 tests/v1/worker/test_gpu_sink.py
  create mode 100644 vllm/v1/sample/sink.py
@@ -1993,7 +1989,7 @@ index 704d6b245..cc25a4f96 100644
      completion_tokens_details: CompletionTokenUsageInfo | None = None
 +    sink_rejection: SinkUsageInfo | None = None
 diff --git a/vllm/envs.py b/vllm/envs.py
-index 2f320dfca..8d4bb1b03 100755
+index 2f320dfca..7f4eb9974 100755
 --- a/vllm/envs.py
 +++ b/vllm/envs.py
 @@ -324,6 +324,11 @@ if TYPE_CHECKING:
@@ -2016,7 +2012,7 @@ index 2f320dfca..8d4bb1b03 100755
 +    # every sampled row (DeepSeek V4.1 Flash: 2455, its BOS sink channel), and
 +    # the magnitude above which the row counts as sunk. -1 keeps the detector
 +    # off. Sunk rows carry 1.1e5 to 1.3e5 there; the largest clean row seen,
-+    # 9,984, is a reasoning word the last layer writes into the column
++    # 10,688, is a reasoning word the last layer writes into the column
 +    # (experiments/2026-10-19-sink-rejection-v2 in spark-ds41f).
 +    "VLLM_SINK_DETECTOR_COLUMN": lambda: int(
 +        os.getenv("VLLM_SINK_DETECTOR_COLUMN", "-1")
@@ -2262,7 +2258,7 @@ index bdb08e48d..412f1233d 100644
      # None identifies a transfer-only or otherwise empty model step.
      compute_service_class: ComputeServiceClass | None = None
 diff --git a/vllm/v1/core/sched/scheduler.py b/vllm/v1/core/sched/scheduler.py
-index 9f2c112f7..db4a59196 100644
+index 9f2c112f7..41988acb7 100644
 --- a/vllm/v1/core/sched/scheduler.py
 +++ b/vllm/v1/core/sched/scheduler.py
 @@ -8,6 +8,8 @@ from collections.abc import Iterable
@@ -2300,30 +2296,32 @@ index 9f2c112f7..db4a59196 100644
  )
 -from vllm.v1.outputs import DraftTokenIds, KVConnectorOutput, ModelRunnerOutput
  from vllm.v1.request import Request, RequestStatus, StreamingUpdate
-+from vllm.v1.sample.sink import SinkConfig, SinkEvent, SinkOutcome, SinkRow
++from vllm.v1.sample.sink import SinkConfig, SinkEvent, SinkOutcome
  from vllm.v1.spec_decode.dynamic.acceptance_length import (
      BatchSizeAcceptanceLengthController,
  )
-@@ -127,7 +137,32 @@ def _build_kv_connector_block_state(
+@@ -127,7 +137,34 @@ def _build_kv_connector_block_state(
      )
  
  
-+def _concat_logprobs(rows: list[LogprobsLists]) -> LogprobsLists:
-+    """Rows from different steps, whose widths follow each step's largest
-+    logprobs request; narrower rows are padded past every request's own
-+    columns."""
-+    width = max(row.logprob_token_ids.shape[1] for row in rows)
++def _concat_logprobs(first: LogprobsLists, second: LogprobsLists) -> LogprobsLists:
++    """Rows of two steps, whose widths follow each step's largest logprobs
++    request; the narrower rows are padded past every request's own columns."""
++    width = max(first.logprobs.shape[1], second.logprobs.shape[1])
 +
 +    def pad(array: np.ndarray, value: float) -> np.ndarray:
-+        missing = width - array.shape[1]
-+        if missing == 0:
-+            return array
-+        return np.pad(array, ((0, 0), (0, missing)), constant_values=value)
++        return np.pad(
++            array, ((0, 0), (0, width - array.shape[1])), constant_values=value
++        )
 +
 +    return LogprobsLists(
-+        np.concatenate([pad(row.logprob_token_ids, 0) for row in rows]),
-+        np.concatenate([pad(row.logprobs, float("-inf")) for row in rows]),
-+        np.concatenate([row.sampled_token_ranks for row in rows]),
++        np.concatenate(
++            [pad(first.logprob_token_ids, 0), pad(second.logprob_token_ids, 0)]
++        ),
++        np.concatenate(
++            [pad(first.logprobs, float("-inf")), pad(second.logprobs, float("-inf"))]
++        ),
++        np.concatenate([first.sampled_token_ranks, second.sampled_token_ranks]),
 +        None,
 +    )
 +
@@ -2337,7 +2335,7 @@ index 9f2c112f7..db4a59196 100644
      def __init__(
          self,
          vllm_config: VllmConfig,
-@@ -187,6 +222,19 @@ class Scheduler(SchedulerInterface):
+@@ -187,6 +224,19 @@ class Scheduler(SchedulerInterface):
          self.num_sampled_tokens_per_step = (
              1 if not vllm_config.model_config.is_diffusion else 0
          )
@@ -2357,7 +2355,7 @@ index 9f2c112f7..db4a59196 100644
  
          # Create KVConnector for the Scheduler. Note that each Worker
          # will have a corresponding KVConnector with Role=WORKER.
-@@ -1098,6 +1146,19 @@ class Scheduler(SchedulerInterface):
+@@ -1098,6 +1148,19 @@ class Scheduler(SchedulerInterface):
                      # that prevents uniform decode optimizations.
                      req_index += 1
                      continue
@@ -2377,7 +2375,7 @@ index 9f2c112f7..db4a59196 100644
  
                  if self.current_step < request.next_decode_eligible_step:
                      # V2+PP+async: enforce `pp_size` steps between same-req decodes
-@@ -2211,6 +2272,17 @@ class Scheduler(SchedulerInterface):
+@@ -2211,6 +2274,17 @@ class Scheduler(SchedulerInterface):
              else:
                  compute_service_class = "decode"
  
@@ -2395,7 +2393,7 @@ index 9f2c112f7..db4a59196 100644
          scheduler_output = SchedulerOutput(
              scheduled_new_reqs=new_reqs_data,
              boundary_logits_only=bool(
-@@ -2239,6 +2311,7 @@ class Scheduler(SchedulerInterface):
+@@ -2239,6 +2313,7 @@ class Scheduler(SchedulerInterface):
              kv_cache_block_copies=pending_kv_cache_block_copies,
              kv_connector_block_state=kv_connector_block_state,
              num_spec_tokens_to_schedule=num_spec_tokens_to_schedule,
@@ -2403,7 +2401,7 @@ index 9f2c112f7..db4a59196 100644
              ec_manager_metadata=self.encoder_cache_manager.get_manager_metadata(),
              compute_service_class=compute_service_class,
              # Execution feedback is only useful while both classes can run.
-@@ -2483,6 +2556,10 @@ class Scheduler(SchedulerInterface):
+@@ -2483,6 +2558,10 @@ class Scheduler(SchedulerInterface):
          request.num_computed_tokens = 0
          if request.spec_token_ids:
              request.spec_token_ids = []
@@ -2414,7 +2412,7 @@ index 9f2c112f7..db4a59196 100644
          # Async scheduling: mark all in-flight output as stale. Its tokens are
          # still delivered on return (dropping them would perturb spec-decode
          # acceptance) but must not mutate the reset counters; each step drains
-@@ -2525,6 +2602,10 @@ class Scheduler(SchedulerInterface):
+@@ -2525,6 +2604,10 @@ class Scheduler(SchedulerInterface):
              request.is_prefill_chunk = request.num_computed_tokens < (
                  request.num_tokens + request.num_output_placeholders
              )
@@ -2425,7 +2423,7 @@ index 9f2c112f7..db4a59196 100644
              scheduler_output.has_structured_output_requests |= (
                  request.use_structured_output and not request.is_prefill_chunk
              )
-@@ -2565,6 +2646,7 @@ class Scheduler(SchedulerInterface):
+@@ -2565,6 +2648,7 @@ class Scheduler(SchedulerInterface):
  
          # Current streaming input behaviour: Keep only computed output tokens
          # (discard final sampled output token).
@@ -2433,7 +2431,7 @@ index 9f2c112f7..db4a59196 100644
          num_computed_tokens = session.num_computed_tokens
          kept_output_tokens = session._all_token_ids[
              session.num_prompt_tokens : num_computed_tokens
-@@ -2858,6 +2940,7 @@ class Scheduler(SchedulerInterface):
+@@ -2858,6 +2942,7 @@ class Scheduler(SchedulerInterface):
              self.requests,
              structured_output_request_ids,
              scheduler_output.scheduled_spec_decode_tokens,
@@ -2441,7 +2439,7 @@ index 9f2c112f7..db4a59196 100644
          )
          return GrammarOutput(
              structured_output_request_ids,
-@@ -2927,6 +3010,8 @@ class Scheduler(SchedulerInterface):
+@@ -2927,6 +3012,8 @@ class Scheduler(SchedulerInterface):
  
          outputs: dict[int, list[EngineCoreOutput]] = defaultdict(list)
          spec_decoding_stats: SpecDecodingStats | None = None
@@ -2450,7 +2448,7 @@ index 9f2c112f7..db4a59196 100644
  
          failed_kv_load_req_ids: set[str] = set()
          if kv_connector_output and kv_connector_output.failed_recving:
-@@ -3005,6 +3090,11 @@ class Scheduler(SchedulerInterface):
+@@ -3005,6 +3092,11 @@ class Scheduler(SchedulerInterface):
              generated_token_ids = (
                  sampled_token_ids[req_index] if sampled_token_ids else []
              )
@@ -2462,7 +2460,7 @@ index 9f2c112f7..db4a59196 100644
  
              scheduled_spec_token_ids = (
                  scheduler_output.scheduled_spec_decode_tokens.get(req_id)
-@@ -3013,14 +3103,18 @@ class Scheduler(SchedulerInterface):
+@@ -3013,14 +3105,18 @@ class Scheduler(SchedulerInterface):
                  generated_token_ids or self.num_sampled_tokens_per_step == 0
              ):
                  num_scheduled_draft_tokens = len(scheduled_spec_token_ids)
@@ -2484,7 +2482,7 @@ index 9f2c112f7..db4a59196 100644
                          scheduler_output.num_invalid_spec_tokens.get(req_id, 0)
                      )
                      num_draft_tokens = min(
-@@ -3028,7 +3122,8 @@ class Scheduler(SchedulerInterface):
+@@ -3028,7 +3124,8 @@ class Scheduler(SchedulerInterface):
                          num_valid_draft_tokens,
                      )
                  num_sampled = self.num_sampled_tokens_per_step
@@ -2494,7 +2492,7 @@ index 9f2c112f7..db4a59196 100644
                  assert num_accepted <= num_draft_tokens, (
                      f"{req_id}: accepted={num_accepted}, "
                      f"valid_drafts={num_draft_tokens}, "
-@@ -3037,12 +3132,9 @@ class Scheduler(SchedulerInterface):
+@@ -3037,12 +3134,9 @@ class Scheduler(SchedulerInterface):
                      f"{(scheduler_output.num_invalid_spec_tokens or {}).get(req_id, 0)}"
                  )
                  # Every unaccepted scheduler placeholder must be rolled back,
@@ -2510,7 +2508,7 @@ index 9f2c112f7..db4a59196 100644
                  # Rejections roll back num_computed_tokens (and, under async
                  # scheduling, num_output_placeholders, which covers the spec
                  # tokens). A stale rejection count predates the preemption
-@@ -3052,17 +3144,28 @@ class Scheduler(SchedulerInterface):
+@@ -3052,17 +3146,28 @@ class Scheduler(SchedulerInterface):
                          request.num_computed_tokens -= num_rejected
                      if request.num_output_placeholders > 0:
                          request.num_output_placeholders -= num_rejected
@@ -2548,7 +2546,7 @@ index 9f2c112f7..db4a59196 100644
  
              # Free encoder inputs only after the step has actually executed.
              if request.has_encoder_inputs:
-@@ -3079,11 +3182,59 @@ class Scheduler(SchedulerInterface):
+@@ -3079,11 +3184,61 @@ class Scheduler(SchedulerInterface):
              status_before_stop = request.status
              num_output_tokens_before = len(request._output_token_ids)
  
@@ -2556,14 +2554,14 @@ index 9f2c112f7..db4a59196 100644
 +            # yet; it is held back as the provisional token (draft zero of the
 +            # request's next step) unless it ends the request.
 +            held_token: int | None = None
-+            sink_logprob_rows: list[LogprobsLists] | None = None
++            sink_logprobs: LogprobsLists | None = None
 +            if self.sink_rejection and generated_token_ids:
 +                if (
 +                    request.sampling_params is not None
 +                    and request.sampling_params.num_logprobs is not None
 +                    and logprobs
 +                ):
-+                    sink_logprob_rows = self._sink_logprob_rows(
++                    sink_logprobs = self._sink_logprobs(
 +                        request,
 +                        logprobs,
 +                        req_index,
@@ -2607,26 +2605,26 @@ index 9f2c112f7..db4a59196 100644
 +                        self._hold_sink_provisional(
 +                            request,
 +                            held_token,
-+                            sink_logprob_rows[-1] if sink_logprob_rows else None,
++                            sink_logprobs.slice_request(len(generated_token_ids) - 1, 1)
++                            if sink_logprobs is not None
++                            else None,
 +                        )
              elif request.pooling_params and pooler_output is not None:
                  # Pooling stops as soon as there is output.
                  request.status = RequestStatus.FINISHED_STOPPED
-@@ -3215,7 +3366,12 @@ class Scheduler(SchedulerInterface):
+@@ -3215,7 +3370,10 @@ class Scheduler(SchedulerInterface):
                  and request.sampling_params.num_logprobs is not None
                  and logprobs
              ):
 -                new_logprobs = logprobs.slice_request(req_index, len(new_token_ids))
-+                if sink_logprob_rows is None:
++                if sink_logprobs is None:
 +                    new_logprobs = logprobs.slice_request(req_index, len(new_token_ids))
 +                elif new_token_ids:
-+                    new_logprobs = _concat_logprobs(
-+                        sink_logprob_rows[: len(new_token_ids)]
-+                    )
++                    new_logprobs = sink_logprobs.slice_request(0, len(new_token_ids))
  
              if self.return_sampling_mask:
                  sampling_masks = model_runner_output.sampling_masks
-@@ -3253,6 +3409,12 @@ class Scheduler(SchedulerInterface):
+@@ -3253,6 +3411,12 @@ class Scheduler(SchedulerInterface):
                          trace_headers=request.trace_headers,
                          routed_experts=routed_experts,
                          num_nans_in_logits=request.num_nans_in_logits,
@@ -2639,7 +2637,7 @@ index 9f2c112f7..db4a59196 100644
                      )
                  )
              else:
-@@ -3384,6 +3546,7 @@ class Scheduler(SchedulerInterface):
+@@ -3384,6 +3548,7 @@ class Scheduler(SchedulerInterface):
                  kv_connector_stats,
                  cudagraph_stats,
                  perf_stats,
@@ -2647,7 +2645,7 @@ index 9f2c112f7..db4a59196 100644
              )
          ) is not None:
              # Return stats to only one of the front-ends.
-@@ -3450,9 +3613,14 @@ class Scheduler(SchedulerInterface):
+@@ -3450,9 +3615,14 @@ class Scheduler(SchedulerInterface):
          return False
  
      def _update_request_with_output(
@@ -2664,7 +2662,7 @@ index 9f2c112f7..db4a59196 100644
          # Append generated tokens and check for stop. Note that if
          # a request is still being prefilled, we expect the model runner
          # to return empty token ids for the request.
-@@ -3522,10 +3690,18 @@ class Scheduler(SchedulerInterface):
+@@ -3522,10 +3692,18 @@ class Scheduler(SchedulerInterface):
                      request.spec_token_ids = []
                  continue
  
@@ -2683,7 +2681,7 @@ index 9f2c112f7..db4a59196 100644
  
      def update_draft_token_ids_in_output(
          self, draft_token_ids: DraftTokenIds, scheduler_output: SchedulerOutput
-@@ -3547,6 +3723,14 @@ class Scheduler(SchedulerInterface):
+@@ -3547,6 +3725,14 @@ class Scheduler(SchedulerInterface):
                  continue
  
              orig_num_spec_tokens = len(placeholder_spec_tokens)
@@ -2698,7 +2696,7 @@ index 9f2c112f7..db4a59196 100644
              # Trim drafts to scheduled number of spec tokens
              # (needed for chunked prefill case for example).
              del spec_token_ids[orig_num_spec_tokens:]
-@@ -3883,6 +4067,7 @@ class Scheduler(SchedulerInterface):
+@@ -3883,6 +4069,7 @@ class Scheduler(SchedulerInterface):
          kv_connector_stats: KVConnectorStats | None = None,
          cudagraph_stats: CUDAGraphStat | None = None,
          perf_stats: PerfStats | None = None,
@@ -2706,7 +2704,7 @@ index 9f2c112f7..db4a59196 100644
      ) -> SchedulerStats | None:
          if not self.log_stats:
              return None
-@@ -3929,6 +4114,7 @@ class Scheduler(SchedulerInterface):
+@@ -3929,6 +4116,7 @@ class Scheduler(SchedulerInterface):
              connector_prefix_cache_stats=connector_prefix_cache_stats,
              kv_cache_eviction_events=eviction_events,
              spec_decoding_stats=spec_stats,
@@ -2714,7 +2712,7 @@ index 9f2c112f7..db4a59196 100644
              kv_connector_stats=connector_stats_payload,
              cudagraph_stats=cudagraph_stats,
              perf_stats=perf_stats,
-@@ -3940,6 +4126,111 @@ class Scheduler(SchedulerInterface):
+@@ -3940,6 +4128,73 @@ class Scheduler(SchedulerInterface):
              local_prefill_backlog_tokens=local_prefill_backlog_tokens,
          )
  
@@ -2726,44 +2724,18 @@ index 9f2c112f7..db4a59196 100644
 +        if request.sink_metrics is None:
 +            request.sink_metrics = RequestSinkMetrics()
 +        request.sink_metrics.observe(event)
-+        # Output positions: draft zero is the next output token; drafter row j
-+        # follows it (or, after a prompt row, the last committed token).
-+        draft_zero_position = request.num_output_tokens
-+        if event.flagged_row0:
-+            if event.row0 == SinkRow.PROMPT:
-+                logger.info(
-+                    "Sink flagged: request %s, prompt row (last prompt token)",
-+                    request.request_id,
-+                )
-+            else:
-+                logger.info(
-+                    "Sink %s: request %s, draft zero at output position %d%s",
-+                    {
-+                        SinkOutcome.FLAGGED: "flagged",
-+                        SinkOutcome.REJECTED: "draft zero rejected",
-+                        SinkOutcome.FALLTHROUGH: "fallthrough",
-+                    }[event.outcome],
-+                    request.request_id,
-+                    draft_zero_position,
-+                    f", tries {request.sink_metrics.num_draft_zero_rejections}"
-+                    if event.outcome == SinkOutcome.REJECTED
-+                    else "",
-+                )
-+        if event.num_drafter_flags:
-+            row = event.cut_row
-+            offset = 0 if event.row0 == SinkRow.DRAFT_ZERO else -1
-+            logger.info(
-+                "Sink %s: request %s, %d drafter row(s)%s",
-+                "draft cut" if row >= 0 else "flagged",
-+                request.request_id,
-+                event.num_drafter_flags,
-+                f", cut at row {row} (output position "
-+                f"{draft_zero_position + row + offset})"
-+                if row >= 0
-+                else "",
-+            )
++        logger.info(
++            "Sink: request %s, next output position %d: %s row %s, %d drafter "
++            "row(s) flagged%s",
++            request.request_id,
++            request.num_output_tokens,
++            event.row0.label,
++            event.outcome.name.lower(),
++            event.num_drafter_flags,
++            f", cut at row {event.cut_row}" if event.cut_row >= 0 else "",
++        )
 +
-+    def _sink_logprob_rows(
++    def _sink_logprobs(
 +        self,
 +        request: Request,
 +        logprobs: LogprobsLists,
@@ -2771,40 +2743,28 @@ index 9f2c112f7..db4a59196 100644
 +        generated_token_ids: list[int],
 +        draft_zero: bool,
 +        sink_event: SinkEvent | None,
-+    ) -> list[LogprobsLists]:
-+        """One logprobs row per generated token: draft zero's is the entry
-+        kept from the step that sampled it; a rejected draft zero's
-+        replacement takes that entry with its own token, logprob and rank in
-+        the same distribution; the others are this step's rows."""
++    ) -> LogprobsLists:
++        """One logprobs row per generated token. Draft zero's is the row kept
++        from the step that sampled it; a rejected draft zero's replacement
++        takes that row with its own token, logprob and rank in the same
++        distribution."""
++        kept = request.sink_provisional_logprobs
 +        if sink_event is not None and sink_event.outcome == SinkOutcome.REJECTED:
-+            assert len(generated_token_ids) == 1
-+            kept = request.sink_provisional_logprobs
 +            assert kept is not None and sink_event.recovered_logprob is not None, (
 +                request.request_id
 +            )
 +            token_ids = kept.logprob_token_ids.copy()
 +            values = kept.logprobs.copy()
-+            ranks = kept.sampled_token_ranks.copy()
 +            token_ids[0, 0] = generated_token_ids[0]
 +            values[0, 0] = sink_event.recovered_logprob
-+            ranks[0] = sink_event.recovered_rank
-+            return [LogprobsLists(token_ids, values, ranks, None)]
++            ranks = np.array([sink_event.recovered_rank])
++            return LogprobsLists(token_ids, values, ranks, None)
 +        draft_zero = draft_zero and len(generated_token_ids) > 1
-+        rows: list[LogprobsLists] = []
-+        if draft_zero:
-+            assert request.sink_provisional_logprobs is not None, request.request_id
-+            rows.append(request.sink_provisional_logprobs)
 +        step = logprobs.slice_request(req_index, len(generated_token_ids) - draft_zero)
-+        rows.extend(
-+            LogprobsLists(
-+                step.logprob_token_ids[i : i + 1],
-+                step.logprobs[i : i + 1],
-+                step.sampled_token_ranks[i : i + 1],
-+                None,
-+            )
-+            for i in range(len(step.sampled_token_ranks))
-+        )
-+        return rows
++        if not draft_zero:
++            return step
++        assert kept is not None, request.request_id
++        return _concat_logprobs(kept, step)
 +
 +    def _hold_sink_provisional(
 +        self, request: Request, token_id: int, logprobs: LogprobsLists | None
@@ -2827,87 +2787,30 @@ index 9f2c112f7..db4a59196 100644
          self,
          spec_decoding_stats: SpecDecodingStats | None,
 diff --git a/vllm/v1/core/sched/utils.py b/vllm/v1/core/sched/utils.py
-index 31fa840e7..3b2ad6443 100644
+index 31fa840e7..dcad02a21 100644
 --- a/vllm/v1/core/sched/utils.py
 +++ b/vllm/v1/core/sched/utils.py
-@@ -91,27 +91,62 @@ def remove_all(lst: list, items_to_remove: set) -> list:
+@@ -91,6 +91,20 @@ def remove_all(lst: list, items_to_remove: set) -> list:
      return [item for item in lst if item not in items_to_remove]
  
  
-+def _terminal_status(
-+    request: Request,
-+    token_id: int,
-+    num_tokens: int,
-+    num_output_tokens: int,
-+    max_model_len: int,
-+) -> tuple[RequestStatus, int | None] | None:
-+    """The finish (status, stop reason) of committing ``token_id`` as the
-+    request's last token, by EOS, a stop token or a length cap, or None."""
++def stops_on_next_token(request: Request, token_id: int, max_model_len: int) -> bool:
++    """Whether committing ``token_id`` next stops the request by EOS, a stop
++    token or a length cap: check_stop's checks that no later token changes.
++    Sink rejection commits such a token as soon as it is sampled."""
 +    sampling_params = request.sampling_params
 +    assert sampling_params is not None
-+
-+    if token_id == sampling_params.eos_token_id:
-+        return RequestStatus.FINISHED_STOPPED, None
-+
-+    if token_id in (sampling_params.stop_token_ids or ()):
-+        return RequestStatus.FINISHED_STOPPED, token_id
-+
-+    if num_tokens >= max_model_len or num_output_tokens >= request.max_tokens:
-+        return RequestStatus.FINISHED_LENGTH_CAPPED, None
-+    return None
-+
-+
-+def stops_on_next_token(request: Request, token_id: int, max_model_len: int) -> bool:
-+    """Whether committing ``token_id`` next finishes the request by EOS, a stop
-+    token or a length cap: the stop checks that no later token can change.
-+    Sink rejection commits such a token as soon as it is sampled."""
 +    return (
-+        _terminal_status(
-+            request,
-+            token_id,
-+            request.num_tokens + 1,
-+            request.num_output_tokens + 1,
-+            max_model_len,
-+        )
-+        is not None
++        token_id == sampling_params.eos_token_id
++        or token_id in (sampling_params.stop_token_ids or ())
++        or request.num_tokens + 1 >= max_model_len
++        or request.num_output_tokens + 1 >= request.max_tokens
 +    )
 +
 +
  def check_stop(request: Request, max_model_len: int) -> bool:
      assert not request.pooling_params
  
-     sampling_params = request.sampling_params
-     assert sampling_params is not None
- 
--    last_token_id = request.output_token_ids[-1]
--    if last_token_id == sampling_params.eos_token_id:
--        request.status = RequestStatus.FINISHED_STOPPED
--        return True
--
--    if last_token_id in (sampling_params.stop_token_ids or ()):
--        request.status = RequestStatus.FINISHED_STOPPED
--        request.stop_reason = last_token_id
--        return True
--
--    if (
--        request.num_tokens >= max_model_len
--        or request.num_output_tokens >= request.max_tokens
--    ):
--        request.status = RequestStatus.FINISHED_LENGTH_CAPPED
-+    terminal = _terminal_status(
-+        request,
-+        request.output_token_ids[-1],
-+        request.num_tokens,
-+        request.num_output_tokens,
-+        max_model_len,
-+    )
-+    if terminal is not None:
-+        request.status, stop_reason = terminal
-+        if stop_reason is not None:
-+            request.stop_reason = stop_reason
-         return True
- 
-     # Note(arpera):
 diff --git a/vllm/v1/engine/__init__.py b/vllm/v1/engine/__init__.py
 index 46517d8b3..39cf07ebd 100644
 --- a/vllm/v1/engine/__init__.py
@@ -3540,7 +3443,7 @@ index 4c0988eef..7099c6198 100644
          if self.routed_experts_cpu is not None:
              self.model_runner_output.routed_experts = self.routed_experts_cpu.tolists()
 diff --git a/vllm/v1/worker/gpu/model_runner.py b/vllm/v1/worker/gpu/model_runner.py
-index f27cb88b7..b66bd196b 100644
+index f27cb88b7..f95037f36 100644
 --- a/vllm/v1/worker/gpu/model_runner.py
 +++ b/vllm/v1/worker/gpu/model_runner.py
 @@ -35,9 +35,11 @@ from vllm.compilation.counter import compilation_counter
@@ -3657,30 +3560,14 @@ index f27cb88b7..b66bd196b 100644
  
          if shard_metadata is not None:
              # Gather the sharded sampler outputs from the TP ranks into a single
-@@ -2113,6 +2146,36 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+@@ -2113,6 +2146,20 @@ class GPUModelRunner(LoRAModelRunnerMixin):
                      vocab_size=vocab_size,
                      invalid_spec_tokens=self.speculative_config is not None,
                  )
 +            if self.sink is not None:
-+                shard_layout = None
-+                if (
-+                    self.rejection_sampler is not None
-+                    and self._greedy_verification_available()
-+                ):
-+                    shard = head.shard_indices
-+                    shard_layout = (
-+                        processor.head_dtype,
-+                        head.num_embeddings_per_partition,
-+                        shard.org_vocab_start_index,
-+                        shard.num_org_elements,
-+                    )
-+                columns = self.model.get_sink_residual_columns()
 +                self.sink.register_warmups(
-+                    num_streams=columns.shape[1],
-+                    dead_rows=dead_rows,
 +                    logits=logits,
 +                    processed_logits_strides=processed_strides,
-+                    shard=shard_layout,
 +                    sampled_widths=(1,)
 +                    + (
 +                        (self.num_speculative_steps + 1,)
@@ -3694,7 +3581,7 @@ index f27cb88b7..b66bd196b 100644
          if self.rejection_sampler is not None and self._greedy_verification_available():
              assert head is not None and processor is not None
              shard = head.shard_indices
-@@ -2230,21 +2293,40 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+@@ -2230,21 +2277,40 @@ class GPUModelRunner(LoRAModelRunnerMixin):
          )
  
      def _verify_greedily(
@@ -3740,7 +3627,7 @@ index f27cb88b7..b66bd196b 100644
              input_batch.cu_num_logits,
              self.rejection_sampler.num_speculative_steps,
          )
-@@ -2263,7 +2345,201 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+@@ -2263,7 +2329,179 @@ class GPUModelRunner(LoRAModelRunnerMixin):
              num_sampled=num_sampled,
              num_rejected=num_rejected,
          )
@@ -3807,28 +3694,6 @@ index f27cb88b7..b66bd196b 100644
 +                "The sink detector needs the model to keep its residual column "
 +                "(get_sink_residual_columns); DeepSeek V4.1 does."
 +            )
-+        if get_tensor_model_parallel_world_size() > 1:
-+            # Every rank decides the same rows: the same settings, and (an
-+            # assumption, VLLM_SINK_DETECTOR_CHECK_RANKS checks it in the lab)
-+            # the same residual bits after the all-reduces.
-+            settings = torch.tensor(
-+                [
-+                    [
-+                        config.column,
-+                        config.threshold,
-+                        config.rejection,
-+                        config.max_retries,
-+                    ]
-+                ],
-+                dtype=torch.float64,
-+                device=self.device,
-+            )
-+            gathered = tensor_model_parallel_all_gather(settings, dim=0)
-+            if not bool((gathered == settings).all()):
-+                raise ValueError(
-+                    "The sink detector's settings differ across tensor-parallel "
-+                    f"ranks: {gathered.tolist()}"
-+                )
 +        assert self.sampler is not None
 +        self.sink = SinkSampler(
 +            config,
@@ -3943,7 +3808,7 @@ index f27cb88b7..b66bd196b 100644
  
      def postprocess_sampled(
          self,
-@@ -2983,8 +3259,17 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+@@ -2983,8 +3221,17 @@ class GPUModelRunner(LoRAModelRunnerMixin):
          elif self.speculator is not None and num_spec_tokens_to_schedule > 0:
              assert self.sampler is not None
              if isinstance(self.speculator, DraftModelSpeculator):
@@ -3962,7 +3827,7 @@ index f27cb88b7..b66bd196b 100644
                  )
              # Let the target override the hidden state fed to the drafter
              # (e.g. DeepSeek V4 MTP needs the pre-hc_head residual). The
-@@ -3071,6 +3356,9 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+@@ -3071,6 +3318,9 @@ class GPUModelRunner(LoRAModelRunnerMixin):
                  input_batch.idx_mapping, boundary_capture, self.block_tables
              )
  
@@ -4121,39 +3986,23 @@ index c9abf4652..187fafa7a 100644
  
 diff --git a/vllm/v1/worker/gpu/sample/sink.py b/vllm/v1/worker/gpu/sample/sink.py
 new file mode 100644
-index 000000000..d56b046c3
+index 000000000..ad844a5b8
 --- /dev/null
 +++ b/vllm/v1/worker/gpu/sample/sink.py
-@@ -0,0 +1,1050 @@
+@@ -0,0 +1,771 @@
 +# SPDX-License-Identifier: Apache-2.0
 +# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-+"""The attention-sink detector and draft-zero rejection on the V2 model runner.
++"""The attention-sink detector and draft-zero rejection on the V2 model runner
++(the policy: vllm.v1.sample.sink).
 +
-+Each step, the detector flags the sampled rows whose pre-norm residual is sunk
-+in the watched column (vllm.v1.sample.sink). With rejection on:
-+
-+- A request's row 0 has draft zero as its input: the token its previous step
-+  sampled, held back by the scheduler as its provisional token. Draft zero is
-+  accepted unless row 0 is flagged; then it is rejected and replaced by the next
-+  alternate of the draw that produced it, and the request's KV position does not
-+  advance (the rejected-draft accounting rolls it back). Past its alternates a
-+  sunk draft zero is committed as it is (a fallthrough).
-+- A flagged drafter row j >= 1 cuts the verification at its draft: the draft's
-+  logit in the previous row is masked before the verification kernels run, so
-+  that row rejects it and recovers its best other token (greedy) or resamples
-+  the residual without it (random). The logits are restored afterwards, so
-+  logprobs stay the model's.
-+- The alternates of each request's last sampled token are the next candidates
-+  of the draw that produced it: the same scores (the logits, plus the same
-+  Gumbel noise for random rows, keyed by the request's seed and the row's
-+  position) in descending order after the sampled token, i.e. sampling without
-+  replacement. They stay on the device, per request slot, with their logprobs
-+  and ranks when the batch returns logprobs.
-+
-+Everything stays on the device; the host sees the step's committed tokens with
-+draft zero in front, and one event record per request, on the sampled-token
-+copy. Each rank also counts the rows it flagged and logs the counts when they
-+change, read back without a synchronization.
++Each step the detector flags the sampled rows whose watched residual column is
++sunk. With rejection on, a flagged row 0 rejects draft zero and takes the next
++alternate of the draw that produced it: the same scores (the logits, plus the
++same Gumbel noise for random rows) in descending order after the sampled token,
++i.e. sampling without replacement. A flagged drafter row cuts the verification:
++its draft is masked in the row before, and restored after the verification.
++Everything stays on the device; each rank counts the rows it flagged and logs
++the counts without a synchronization.
 +"""
 +
 +from dataclasses import dataclass
@@ -4168,7 +4017,7 @@ index 000000000..d56b046c3
 +    triton_kernel_dispatcher_with_warmup,
 +    triton_warmup_inputs,
 +)
-+from vllm.triton_utils import HAS_TRITON, tl, triton
++from vllm.triton_utils import tl, triton
 +from vllm.v1.sample.sink import NUM_SINK_EVENT_FIELDS, SinkConfig, SinkRow
 +from vllm.v1.worker.gpu.sample.gumbel import gumbel_noised_scores
 +
@@ -4177,85 +4026,6 @@ index 000000000..d56b046c3
 +# Vocabulary block of the candidates kernel; each block contributes
 +# max_retries + 1 candidates to the merge.
 +_CANDIDATE_BLOCK_SIZE = 1024
-+# Larger than any logits row index, for the request search of a row (a
-+# constexpr for Triton; on the CPU worker path `tl` is a placeholder).
-+_NO_ROW = tl.constexpr(0x7FFFFFFF) if HAS_TRITON else 0x7FFFFFFF
-+
-+
-+@triton.jit
-+def _request_of_row(cu_num_logits_ptr, row, num_reqs, PADDED_REQS: tl.constexpr):
-+    """The batch index of the request that owns logits row ``row``."""
-+    reqs = tl.arange(0, PADDED_REQS)
-+    ends = tl.load(cu_num_logits_ptr + 1 + reqs, mask=reqs < num_reqs, other=_NO_ROW)
-+    return tl.sum((ends <= row).to(tl.int32), axis=0)
-+
-+
-+@triton.jit(do_not_specialize=["num_reqs"])
-+def _sink_flags_kernel(
-+    # [num_logits] int8
-+    flags_ptr,
-+    # [num_tokens, NUM_STREAMS] float32: the watched residual column per stream
-+    columns_ptr,
-+    # [num_logits]
-+    logits_indices_ptr,
-+    # [num_reqs + 1]
-+    cu_num_logits_ptr,
-+    # [num_reqs]: live drafts per request (dead verification rows), or None
-+    dead_cut_ptr,
-+    num_reqs,
-+    threshold,
-+    NUM_STREAMS: tl.constexpr,
-+    PADDED_STREAMS: tl.constexpr,
-+    PADDED_REQS: tl.constexpr,
-+):
-+    row = tl.program_id(0)
-+    token = tl.load(logits_indices_ptr + row).to(tl.int64)
-+    streams = tl.arange(0, PADDED_STREAMS)
-+    values = tl.load(
-+        columns_ptr + token * NUM_STREAMS + streams,
-+        mask=streams < NUM_STREAMS,
-+        other=0.0,
-+    )
-+    flag = tl.max(tl.abs(values), axis=0) > threshold
-+    if dead_cut_ptr is not None:
-+        # A dead row skipped routed MoE: its residual is not the model's.
-+        req = _request_of_row(cu_num_logits_ptr, row, num_reqs, PADDED_REQS)
-+        local = row - tl.load(cu_num_logits_ptr + req)
-+        flag = flag & (local <= tl.load(dead_cut_ptr + req))
-+    tl.store(flags_ptr + row, flag.to(tl.int8))
-+
-+
-+@triton.jit(do_not_specialize=["num_reqs"])
-+def _sink_cut_kernel(
-+    # [num_logits, logits_stride]: this rank's columns of the target logits
-+    logits_ptr,
-+    logits_stride,
-+    # [num_logits]: the logit the cut overwrote, and its column
-+    saved_ptr,
-+    cols_ptr,
-+    # [num_logits] int8
-+    flags_ptr,
-+    # [num_logits]: each row's input token (draft zero or a draft)
-+    draft_ptr,
-+    # [num_reqs + 1]
-+    cu_num_logits_ptr,
-+    num_reqs,
-+    vocab_start,
-+    vocab_cols,
-+    PADDED_REQS: tl.constexpr,
-+):
-+    row = tl.program_id(0)
-+    req = _request_of_row(cu_num_logits_ptr, row, num_reqs, PADDED_REQS)
-+    has_next = row + 1 < tl.load(cu_num_logits_ptr + req + 1)
-+    next_flag = tl.load(flags_ptr + row + 1, mask=has_next, other=0) != 0
-+    draft = tl.load(draft_ptr + row + 1, mask=has_next, other=-1).to(tl.int64)
-+    col = draft - vocab_start
-+    cut = next_flag & (draft >= 0) & (col >= 0) & (col < vocab_cols)
-+    col = tl.where(cut, col, 0)
-+    ptr = logits_ptr + row.to(tl.int64) * logits_stride + col
-+    tl.store(saved_ptr + row, tl.load(ptr))
-+    tl.store(cols_ptr + row, col)
-+    tl.store(ptr, float("-inf"), mask=cut)
 +
 +
 +@triton.jit
@@ -4334,46 +4104,6 @@ index 000000000..d56b046c3
 +        tl.store(values_ptr + out + i, value)
 +        tl.store(indices_ptr + out + i, block_idx * BLOCK_SIZE + idx)
 +        scores = tl.where(offsets == idx, float("-inf"), scores)
-+
-+
-+@triton.jit
-+def _sink_merge_kernel(
-+    # [num_reqs, NUM_ALTERNATES]
-+    alternates_ptr,
-+    # [num_reqs, num_candidates]
-+    values_ptr,
-+    indices_ptr,
-+    candidates_stride,
-+    num_candidates,
-+    # [num_reqs]
-+    num_sampled_ptr,
-+    # [num_reqs, sampled_stride]
-+    sampled_ptr,
-+    sampled_stride,
-+    NUM_ALTERNATES: tl.constexpr,
-+    PADDED_CANDIDATES: tl.constexpr,
-+):
-+    req = tl.program_id(0)
-+    local = tl.maximum(tl.load(num_sampled_ptr + req) - 1, 0)
-+    emitted = tl.load(sampled_ptr + req * sampled_stride + local)
-+    c = tl.arange(0, PADDED_CANDIDATES)
-+    in_range = c < num_candidates
-+    values = tl.load(
-+        values_ptr + req * candidates_stride + c, mask=in_range, other=float("-inf")
-+    )
-+    ids = tl.load(indices_ptr + req * candidates_stride + c, mask=in_range, other=-1)
-+    # The sampled token itself and NaN scores are no alternates; impossible
-+    # tokens score -inf.
-+    excluded = (ids == emitted) | (ids < 0) | (values != values)
-+    values = tl.where(excluded, float("-inf"), values)
-+    for i in tl.static_range(NUM_ALTERNATES):
-+        best, j = tl.max(values, axis=0, return_indices=True)
-+        token = tl.sum(tl.where(c == j, ids, 0), axis=0)
-+        tl.store(
-+            alternates_ptr + req * NUM_ALTERNATES + i,
-+            tl.where(best > float("-inf"), token, -1),
-+        )
-+        values = tl.where(c == j, float("-inf"), values)
 +
 +
 +@triton.jit
@@ -4531,52 +4261,6 @@ index 000000000..d56b046c3
 +    tl.atomic_add(counts_ptr + 2, ((not decoding) & row0_flag).to(tl.int64))
 +
 +
-+def _flags_warmup_inputs(
-+    *, num_streams: int, max_num_reqs: int, dead_rows: bool
-+) -> dict[str, Any]:
-+    int32 = TritonWarmupTensor(torch.int32)
-+    return triton_warmup_inputs(
-+        _sink_flags_kernel,
-+        TritonWarmupTensor(torch.int8),
-+        TritonWarmupTensor(torch.float32),
-+        TritonWarmupTensor(torch.int64),
-+        int32,
-+        int32 if dead_rows else None,
-+        2,
-+        1.0,
-+        grid=(1,),
-+        NUM_STREAMS=num_streams,
-+        PADDED_STREAMS=triton.next_power_of_2(num_streams),
-+        PADDED_REQS=triton.next_power_of_2(max_num_reqs),
-+    )
-+
-+
-+def _cut_warmup_inputs(
-+    *,
-+    logits_dtype: torch.dtype,
-+    logits_stride: int,
-+    vocab_start: int,
-+    vocab_cols: int,
-+    max_num_reqs: int,
-+) -> dict[str, Any]:
-+    int32 = TritonWarmupTensor(torch.int32)
-+    return triton_warmup_inputs(
-+        _sink_cut_kernel,
-+        TritonWarmupTensor(logits_dtype),
-+        logits_stride,
-+        TritonWarmupTensor(logits_dtype),
-+        TritonWarmupTensor(torch.int64),
-+        TritonWarmupTensor(torch.int8),
-+        int32,
-+        int32,
-+        2,
-+        vocab_start,
-+        vocab_cols,
-+        grid=(1,),
-+        PADDED_REQS=triton.next_power_of_2(max_num_reqs),
-+    )
-+
-+
 +def _candidates_warmup_inputs(
 +    *,
 +    logits_dtype: torch.dtype,
@@ -4612,30 +4296,6 @@ index 000000000..d56b046c3
 +        NUM_CANDIDATES=num_candidates,
 +        USE_FP64=use_fp64,
 +        MASK_REJECTED_DRAFT=mask_rejected_draft,
-+    )
-+
-+
-+def _merge_warmup_inputs(
-+    *,
-+    values_dtype: torch.dtype,
-+    num_candidates: int,
-+    sampled_stride: int,
-+    num_alternates: int,
-+) -> dict[str, Any]:
-+    int64 = TritonWarmupTensor(torch.int64)
-+    return triton_warmup_inputs(
-+        _sink_merge_kernel,
-+        int64,
-+        TritonWarmupTensor(values_dtype),
-+        int64,
-+        num_candidates,
-+        num_candidates,
-+        TritonWarmupTensor(torch.int32),
-+        int64,
-+        sampled_stride,
-+        grid=(1,),
-+        NUM_ALTERNATES=num_alternates,
-+        PADDED_CANDIDATES=triton.next_power_of_2(num_candidates),
 +    )
 +
 +
@@ -4688,18 +4348,9 @@ index 000000000..d56b046c3
 +    )
 +
 +
-+_flags_launcher = triton_kernel_dispatcher_with_warmup(
-+    warmup_inputs=_flags_warmup_inputs
-+)(_sink_flags_kernel)
-+_cut_launcher = triton_kernel_dispatcher_with_warmup(warmup_inputs=_cut_warmup_inputs)(
-+    _sink_cut_kernel
-+)
 +_candidates_launcher = triton_kernel_dispatcher_with_warmup(
 +    warmup_inputs=_candidates_warmup_inputs
 +)(_sink_candidates_kernel)
-+_merge_launcher = triton_kernel_dispatcher_with_warmup(
-+    warmup_inputs=_merge_warmup_inputs
-+)(_sink_merge_kernel)
 +_policy_launcher = triton_kernel_dispatcher_with_warmup(
 +    warmup_inputs=_policy_warmup_inputs
 +)(_sink_policy_kernel)
@@ -4714,7 +4365,7 @@ index 000000000..d56b046c3
 +    cols: torch.Tensor
 +
 +    def restore(self) -> None:
-+        self.logits.scatter_(1, self.cols[:, None], self.saved[:, None])
++        self.logits.scatter_(1, self.cols, self.saved)
 +
 +
 +@dataclass
@@ -4800,28 +4451,19 @@ index 000000000..d56b046c3
 +        num_reqs: int,
 +        dead_cut: torch.Tensor | None,
 +    ) -> torch.Tensor:
-+        """One int8 flag per logits row: ``max over the residual streams of
-+        |residual[token, column]| > threshold``. ``columns`` is the model's
++        """One int8 flag per logits row: some residual stream has
++        ``|residual[token, column]| > threshold``. ``columns`` is the model's
 +        watched column of every token's pre-norm residual streams,
 +        ``[tokens, streams]`` float32. Rows past a request's live drafts
-+        (``dead_cut``) are never flagged."""
-+        num_logits = logits_indices.shape[0]
-+        num_streams = columns.shape[1]
-+        assert columns.dtype == torch.float32 and columns.is_contiguous()
-+        flags = torch.empty(num_logits, dtype=torch.int8, device=self.device)
-+        _flags_launcher[(num_logits,)](
-+            flags,
-+            columns,
-+            logits_indices,
-+            cu_num_logits,
-+            dead_cut,
-+            num_reqs,
-+            float(self.config.threshold),
-+            NUM_STREAMS=num_streams,
-+            PADDED_STREAMS=triton.next_power_of_2(num_streams),
-+            PADDED_REQS=triton.next_power_of_2(self.max_num_reqs),
-+        )
-+        return flags
++        (``dead_cut``) are never flagged: they skipped routed MoE."""
++        flags = (columns[logits_indices].abs() > self.config.threshold).any(dim=1)
++        if dead_cut is not None:
++            rows = torch.arange(
++                flags.shape[0], dtype=cu_num_logits.dtype, device=self.device
++            )
++            req = torch.searchsorted(cu_num_logits[1 : num_reqs + 1], rows, right=True)
++            flags &= rows - cu_num_logits[req] <= dead_cut[req]
++        return flags.to(torch.int8)
 +
 +    def cut(
 +        self,
@@ -4834,25 +4476,21 @@ index 000000000..d56b046c3
 +        vocab_cols: int | None = None,
 +    ) -> SinkCut:
 +        """Masks, in place, the draft of every flagged drafter row in the row
-+        that verifies it. ``logits`` may be this rank's vocabulary shard
-+        (columns from ``vocab_start``); a draft outside it is left alone."""
-+        num_logits = logits.shape[0]
-+        saved = torch.empty(num_logits, dtype=logits.dtype, device=self.device)
-+        cols = torch.empty(num_logits, dtype=torch.int64, device=self.device)
-+        _cut_launcher[(num_logits,)](
-+            logits,
-+            logits.stride(0),
-+            saved,
-+            cols,
-+            flags,
-+            drafts,
-+            cu_num_logits,
-+            num_reqs,
-+            vocab_start,
-+            logits.shape[1] if vocab_cols is None else vocab_cols,
-+            PADDED_REQS=triton.next_power_of_2(self.max_num_reqs),
-+        )
-+        return SinkCut(logits, saved, cols)
++        before it, which verifies it. ``logits`` may be this rank's vocabulary
++        shard (columns from ``vocab_start``); a draft outside it is left
++        alone."""
++        num_logits, num_cols = logits.shape
++        # Row r + 1 holds a draft of row r's request unless it starts one.
++        starts = torch.zeros(num_logits + 1, dtype=torch.bool, device=self.device)
++        starts[cu_num_logits[:num_reqs].long()] = True
++        cols = drafts[1:num_logits].long() - vocab_start
++        cut = flags[1:num_logits].bool() & ~starts[1:num_logits] & (cols >= 0)
++        cut &= cols < (num_cols if vocab_cols is None else vocab_cols)
++        cols = cols.where(cut, 0)[:, None]
++        rows = logits[: num_logits - 1]
++        saved = rows.gather(1, cols)
++        rows.scatter_(1, cols, saved.masked_fill(cut[:, None], float("-inf")))
++        return SinkCut(rows, saved, cols)
 +
 +    def alternates_of(
 +        self,
@@ -4940,23 +4578,18 @@ index 000000000..d56b046c3
 +        num_sampled: torch.Tensor,
 +        sampled: torch.Tensor,
 +    ) -> torch.Tensor:
-+        num_reqs, num_candidates = values.shape
-+        alternates = torch.empty(
-+            (num_reqs, self.num_alternates), dtype=torch.int64, device=self.device
++        """The best candidates after each request's last sampled token, ties
++        to the lower token as in the samplers' argmax (candidates come in
++        vocabulary order). The sampled token and NaN scores are no alternates;
++        impossible tokens (-inf) become -1."""
++        last = (num_sampled.long() - 1).clamp(min=0)[:, None]
++        excluded = (indices == sampled.gather(1, last)) | values.isnan()
++        values = values.masked_fill(excluded, float("-inf"))
++        values, order = values.sort(dim=1, descending=True, stable=True)
++        alternates = indices.gather(1, order[:, : self.num_alternates])
++        return alternates.masked_fill(
++            values[:, : self.num_alternates] == float("-inf"), -1
 +        )
-+        _merge_launcher[(num_reqs,)](
-+            alternates,
-+            values,
-+            indices,
-+            num_candidates,
-+            num_candidates,
-+            num_sampled,
-+            sampled,
-+            sampled.stride(0),
-+            NUM_ALTERNATES=self.num_alternates,
-+            PADDED_CANDIDATES=triton.next_power_of_2(num_candidates),
-+        )
-+        return alternates
 +
 +    def alternate_logprobs_of(
 +        self,
@@ -5097,26 +4730,14 @@ index 000000000..d56b046c3
 +    def register_warmups(
 +        self,
 +        *,
-+        num_streams: int,
-+        dead_rows: bool,
 +        logits: tuple[tuple[torch.dtype, int], ...],
 +        processed_logits_strides: tuple[int, ...],
-+        shard: tuple[torch.dtype, int, int, int] | None,
 +        sampled_widths: tuple[int, ...],
 +        bin_counts_stride: int,
 +    ) -> None:
-+        """Register the kernels a step launches: the flags for the model's
-+        ``num_streams`` residual streams (and the dead-row variant), the cut
-+        and the alternates of the raw and processed target logits (``(dtype,
-+        row stride)``) and of this rank's shard (``(dtype, row stride, vocab
-+        start, columns)``) for greedy verification, and the policy for each
-+        sampled width."""
-+        for dead in (False, True) if dead_rows else (False,):
-+            _flags_launcher.register_warmup(
-+                num_streams=num_streams,
-+                max_num_reqs=self.max_num_reqs,
-+                dead_rows=dead,
-+            )
++        """Register the kernels a step launches: the policy for each sampled
++        width, and the alternates of the raw and processed target logits
++        (``(dtype, row stride)``)."""
 +        for logprobs in (False, True):
 +            for width in sampled_widths:
 +                _policy_launcher.register_warmup(
@@ -5129,16 +4750,7 @@ index 000000000..d56b046c3
 +        if not self.rejection:
 +            return
 +        targets = (*logits, *((torch.float32, s) for s in processed_logits_strides))
-+        values_dtype = torch.float64 if self.use_fp64_gumbel else torch.float32
 +        for dtype, stride in targets:
-+            if self.num_speculative_steps > 0:
-+                _cut_launcher.register_warmup(
-+                    logits_dtype=dtype,
-+                    logits_stride=stride,
-+                    vocab_start=0,
-+                    vocab_cols=min(stride, self.vocab_size),
-+                    max_num_reqs=self.max_num_reqs,
-+                )
 +            for width in sampled_widths:
 +                _candidates_launcher.register_warmup(
 +                    logits_dtype=dtype,
@@ -5149,32 +4761,6 @@ index 000000000..d56b046c3
 +                    use_fp64=self.use_fp64_gumbel,
 +                    mask_rejected_draft=width > 1,
 +                )
-+        num_blocks = triton.cdiv(self.vocab_size, _CANDIDATE_BLOCK_SIZE)
-+        for width in sampled_widths:
-+            _merge_launcher.register_warmup(
-+                values_dtype=values_dtype,
-+                num_candidates=num_blocks * self.num_candidates,
-+                sampled_stride=width,
-+                num_alternates=self.num_alternates,
-+            )
-+        if shard is not None and self.num_speculative_steps > 0:
-+            dtype, stride, vocab_start, vocab_cols = shard
-+            from vllm.distributed import get_tensor_model_parallel_world_size
-+
-+            _cut_launcher.register_warmup(
-+                logits_dtype=dtype,
-+                logits_stride=stride,
-+                vocab_start=vocab_start,
-+                vocab_cols=vocab_cols,
-+                max_num_reqs=self.max_num_reqs,
-+            )
-+            _merge_launcher.register_warmup(
-+                values_dtype=torch.float32,
-+                num_candidates=get_tensor_model_parallel_world_size()
-+                * self.num_candidates,
-+                sampled_stride=self.num_speculative_steps + 1,
-+                num_alternates=self.num_alternates,
-+            )
 diff --git a/vllm/v1/worker/gpu/spec_decode/dflash/speculator.py b/vllm/v1/worker/gpu/spec_decode/dflash/speculator.py
 index 4b6a263e4..d9f678658 100644
 --- a/vllm/v1/worker/gpu/spec_decode/dflash/speculator.py
@@ -5472,31 +5058,6 @@ index e17d7d37d..70090a558 100644
              decode_output.total_num_scheduled_tokens = sum(
                  step_num_scheduled_tokens.values()
              )
-diff --git a/vllm/v1/worker/gpu_model_runner.py b/vllm/v1/worker/gpu_model_runner.py
-index 45627c718..349090f44 100644
---- a/vllm/v1/worker/gpu_model_runner.py
-+++ b/vllm/v1/worker/gpu_model_runner.py
-@@ -191,6 +191,7 @@ from vllm.v1.sample.logits_processor.interface import LogitsProcessor
- from vllm.v1.sample.metadata import SamplingMetadata
- from vllm.v1.sample.rejection_sampler import RejectionSampler
- from vllm.v1.sample.sampler import Sampler
-+from vllm.v1.sample.sink import SinkConfig
- from vllm.v1.spec_decode.custom_class_proposer import create_custom_proposer
- from vllm.v1.spec_decode.dflash import DFlashProposer
- from vllm.v1.spec_decode.draft_model import DraftModelProposer
-@@ -609,6 +610,12 @@ class GPUModelRunner(
-         # Async PP broadcast of sampled token ids, waited on in _prepare_input_ids.
-         self._pp_recv_work: torch.distributed.Work | None = None
- 
-+        if SinkConfig.from_env() is not None:
-+            raise ValueError(
-+                "The sink detector (VLLM_SINK_DETECTOR_COLUMN) runs on model "
-+                "runner V2 only (VLLM_USE_V2_MODEL_RUNNER=1)."
-+            )
-+
-         # Sampler
-         self.sampler = Sampler(
-             logprobs_mode=self.model_config.logprobs_mode,
 -- 
 2.54.0 (Apple Git-157)
 
