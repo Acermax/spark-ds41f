@@ -36,3 +36,33 @@ TP3 is thin enough to fail some boots. The chunking check moves to 6,144 (`chunk
 `skip-6144-i1-tp3.json`): long prompts split at 6,096 instead of 4,048 and 8,096, so equal
 digests show outputs do not depend on where a prompt splits (the encoder side of item 6's
 load-dependent chunks).
+
+## Stall results (2026-10-19 14:26-15:12 UTC, ten repeats each)
+
+What seven decoding streams wait while a cold 131K prompt prefills, with the skip:
+
+| Arm | Mean gap | p50 | p99 (sd) | Worst wait, mean / max (sd) | 131K prefill under them |
+| --- | ---: | ---: | --- | --- | ---: |
+| 4,096, interval 1 | 0.746 s | 0.858 s | 1.06 s (0.30) | 1.42 / 1.80 s (0.44) | 4,520 tok/s |
+| 4,096, interval 2 | 0.461 s | 0.122 s | 0.93 s (0.02) | 1.01 / 1.04 s (0.04) | 4,007 tok/s |
+| 4,096, interval 3 | 0.352 s | 0.115 s | 0.92 s (0.01) | 1.01 / 1.04 s (0.04) | 3,599 tok/s |
+| 8,192, interval 1 | 1.076 s | 1.441 s | 1.72 s (0.44) | 2.26 / 3.06 s (0.73) | 5,278 tok/s |
+
+The decode step without a prefill is 0.099 s throughout. Interleaving cuts the mean gap
+38% (interval 2) and 53% (interval 3) and takes the worst wait from 1.0-1.8 s to a steady
+1.0 s (one prefill step), for 11% and 20% slower prefill while others decode; a prefill
+with nobody decoding is not throttled. Interval 2 is bit-exact (above).
+
+**Larger budgets fail dgx1's startup guard.** 8,192 at intervals 2 and 3 and the 6,144
+chunking check (`chunking.json`) did not boot: the startup guard stopped them at 5.01-5.24
+GiB MemAvailable against its 5 GiB floor (journalctl -t spark-memguard, 15:10-15:15 UTC).
+Over the day, boots above 4,096 passed three times (6,144 once, 8,192 twice) and failed
+three times; every boot at 4,096 passed. Serving memory is not the limit (the budget
+sweep: dgx1 at least 4.57 GiB through 1M at 8,192); the startup peak is. A larger TP3
+budget, and load-dependent chunks that need one, wait on lowering that peak. The chunking
+check and the 8,192 interleaving arms are unmeasured.
+
+**Recommendation.** TP3 keeps 4,096 with the skip (+11% prefill, outputs identical, the
+other streams' median step 10% shorter). Interval 2 is the owner's trade: the other
+streams' mean gap -38% and worst wait about 1.0 s, against 11% slower prefill while others
+decode. No promotion or production change.
