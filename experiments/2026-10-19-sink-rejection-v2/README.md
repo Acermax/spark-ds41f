@@ -248,6 +248,16 @@ arms: **r6x**, **detector** (`VLLM_SINK_DETECTOR_COLUMN=2455`) and **correction*
 7. **Speculation does not change greedy tokens.** The correction arm with and without
    `--speculative-config`, temperature 0, on the release prompts and the 16 probes: identical tokens,
    with `Say hi.` and `Thanks!` flagged and clean in both.
+8. **Logprobs.** The release-tp3 c1 and c16 cells with `logprobs=5` on r6x and the correction arm.
+   With logprobs, every step computes the logprob and rank of the three alternates of every request
+   (several passes over the vocabulary per request), used only on a rejection; this is where a step
+   cost should show. Within the release noise, it stays as it is; otherwise those passes are fused
+   into one.
+
+The other per-step costs of the correction arm (the candidates kernel, one all-gather of 8 floats per
+request on the all-greedy path, about 25 small launches, the scheduler's per-request event
+conversion) are read from item 1's engine grid. The first boot with the detector recompiles: its
+column is part of the compile cache key.
 
 ## Open
 
@@ -263,3 +273,6 @@ arms: **r6x**, **detector** (`VLLM_SINK_DETECTOR_COLUMN=2455`) and **correction*
   detector arm is the first count over serving traffic.
 - The no-speculation path and DFlash are covered by the CPU and kernel tests and gate item 7, not by a
   serving run.
+- Two cheap optimizations are held until the gate has measured their costs (owner, 2026-10-19):
+  fusing the alternates' logprob and rank passes (item 8), and skipping the host event conversion,
+  which walks every request each step, when no row is flagged.
