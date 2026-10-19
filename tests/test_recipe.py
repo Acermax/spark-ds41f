@@ -205,6 +205,18 @@ class RecipeTest(unittest.TestCase):
         self.assertEqual(values["long_prefill_token_threshold"], "8096")
         self.assertEqual(values["tensor_parallel_size"], "4")
 
+    def test_each_shape_pins_its_prefill_budget(self):
+        """Each shape's long-prefill budget is its own sweep's answer (a TP3 rank holds a
+        third of the model, so its headroom differs): changing one must not move another.
+        The threshold is the budget less streams x (1 + drafts)."""
+        expected = {"tp4-ring": ("8192", "8096"), "tp3-triangle": ("4096", "4048"),
+                    "tp3-triangle-4k": ("4096", "4048")}
+        self.assertEqual(set(self.recipe["shapes"]), set(expected))
+        for name, budget in expected.items():
+            values = recipe.values(self.recipe, recipe.shape_entry(self.recipe, name))
+            self.assertEqual((values["max_num_batched_tokens"], values["long_prefill_token_threshold"]),
+                             budget, name)
+
     def test_a_variant_is_qualified_on_its_own(self):
         resolved = recipe.resolve(self.recipe, "tp3-triangle-4k")
         old = load("experiments/2026-10-14-one-recipe/tp3-4k-r6h.json")
