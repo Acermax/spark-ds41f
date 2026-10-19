@@ -70,9 +70,16 @@ test that clears the CED kernels' in-memory caches before the freeze.
 
 **Switches (0207, 0209).** CEDState stages per-request int32 limits (2^31-1 keeps every
 row, 128 otherwise) and declares the three request specializations, the row map and the
-ten packed copy layouts for preparation. The Triton request and copy kernels and the copy
-warmup are removed; the benchmark keeps frozen copies as references. The series 0185-0209
-on r6x f3b58ed9d reproduces vLLM tree ebc02de3.
+packed copy layouts the deployment launches for preparation. The Triton request and copy
+kernels and the copy warmup are removed; the benchmark keeps frozen copies as references.
+
+**Follow-ups (0210, 0211).** The single-request and unchanged-row specializations compile
+as `ced_requests` like the compacting one (one kernel name per kernel in traces, as the
+indexer's specializations share theirs), and the CED kernel tests move to
+`tests/kernels/test_deepseek_v41_tilelang_ced.py`, named after the module and benchmark.
+Only a non-last pipeline stage scatters the float32 pre-mix, so that copy is declared only
+under pipeline parallelism: a TP deployment prepares nine copy layouts, every one it can
+launch. The series 0185-0211 on r6x f3b58ed9d reproduces vLLM tree 9f6715b7 (1a15f6b6b).
 
 **Not ported:** `_gather_lookback` (model_state.py) is Engram's token-history window, not
 CED row selection.

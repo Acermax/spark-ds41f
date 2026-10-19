@@ -1,5 +1,5 @@
 {
- "notes": "r6x TP3 1M with the TileLang CED ports (vLLM e4d57b3fb: requests, row map, row copy) as runtime overlays; no test code.",
+ "notes": "r6x TP3 1M with the TileLang CED ports (vLLM 1a15f6b6b: requests, row map, row copy, and the state that declares them) as runtime overlays; no test code.",
  "extends": {
   "config": "config/cluster.json",
   "shape": "tp3-triangle"
@@ -20,6 +20,11 @@
     [
      "{home}/projects/spark-ds41f/experiments/2026-10-19-ced-gates/overlays/ports/vllm_models_deepseek_v4_1_ced.py",
      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/ced.py",
+     "ro"
+    ],
+    [
+     "{home}/projects/spark-ds41f/experiments/2026-10-19-ced-gates/overlays/ports/vllm_models_deepseek_v4_1_nvidia_model_state.py",
+     "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/nvidia/model_state.py",
      "ro"
     ]
    ]

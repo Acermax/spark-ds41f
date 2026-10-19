@@ -40,6 +40,10 @@
     [
       "prepare_fixtures.py",
       "/b/prepare_fixtures.py"
+    ],
+    [
+      "model_state.py",
+      "/opt/spark3/candidate/vllm/vllm/models/deepseek_v4_1/nvidia/model_state.py"
     ]
   ]
 }
