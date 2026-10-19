@@ -216,7 +216,8 @@ fail in the image as built.
 
 ## Screen (owner, 2026-10-19: a short screen first, then the gate)
 
-[screen.json](screen.json), one lab window on the TP3 triangle. The arms mount the candidate's 29
+[screen.json](screen.json) then [probes.json](probes.json), queued into one lab window on the TP3
+triangle. The arms mount the candidate's 29
 changed vLLM files ([overlay/](overlay), vLLM 7f4c7dc8e) over the r6x image, whose tree is the
 candidate's base: every change is Python, so this is the candidate's image.
 
