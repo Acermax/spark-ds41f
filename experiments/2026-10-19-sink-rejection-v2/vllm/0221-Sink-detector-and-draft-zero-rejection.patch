@@ -1,6 +1,6 @@
-From 0d63e52a3fce860b829ff828917c6174dda44dba Mon Sep 17 00:00:00 2001
+From 616d1a28df1c6c3589f45cd2e54dfb88db129541 Mon Sep 17 00:00:00 2001
 From: Christopher Owen <3221756+christopherowen@users.noreply.github.com>
-Date: Tue, 20 Oct 2026 08:28:46 +0200
+Date: Tue, 20 Oct 2026 09:30:15 +0200
 Subject: [PATCH] Sink detector and draft-zero rejection: verify each step's
  last sampled token as draft zero of the next
 
@@ -37,10 +37,12 @@ FlashInfer sampling stays on with rejection off.
 The detector reads the watched column of each residual stream, which the SM120 V4.1 model
 (vllm/models/deepseek_v4_1, the one GB10 loads) keeps as [tokens, 4] float32
 (get_sink_residual_columns), gathered like its hidden states under sequence parallelism and
-CED row compaction; the runner refuses models without it. Default threshold 50000: sunk sampled rows
-108,032-125,440, clean ones at most 10,688 on the CPU reference. Dead verification rows are
-not flagged. VLLM_SINK_DETECTOR_CHECK_RANKS=1 checks the tensor-parallel ranks' flags every
-step (lab only). The sampling-only settings stay out of the compile cache key.
+CED row compaction; the runner refuses models without it. Default threshold 85000, the
+geometric midpoint between the largest ordinary row of a 358,785-token served survey
+(62,720, number tokens) and the smallest sunk row (108,032 on DeepSeek's CPU reference;
+116,736-118,784 served). Dead verification rows are not flagged.
+VLLM_SINK_DETECTOR_CHECK_RANKS=1 checks the tensor-parallel ranks' flags every step (lab
+only). The sampling-only settings stay out of the compile cache key.
 
 Surfaced as vllm:sink_flagged_rows{row=draft_zero|drafter|prompt},
 vllm:sink_draft_zero_rejections, vllm:sink_draft_cuts, vllm:sink_fallthroughs, the periodic
@@ -64,12 +66,12 @@ unchanged. The tokenizer, parser, sampling, verification, drafter-input and sche
 suites fail exactly where the untouched image fails offline.
 ---
  tests/v1/core/test_sink_draft_zero.py         | 912 ++++++++++++++++++
- tests/v1/worker/test_gpu_sink.py              | 893 +++++++++++++++++
+ tests/v1/worker/test_gpu_sink.py              | 897 +++++++++++++++++
  vllm/entrypoints/generate/base/serving.py     |  23 +-
  .../openai/chat_completion/serving.py         |   3 +
  vllm/entrypoints/openai/completion/serving.py |   3 +
  vllm/entrypoints/serve/engine/protocol.py     |  16 +
- vllm/envs.py                                  |  39 +
+ vllm/envs.py                                  |  40 +
  vllm/models/deepseek_v4_1/nvidia/model.py     |  30 +
  vllm/models/deepseek_v4_1/nvidia/vl_model.py  |   4 +
  vllm/outputs.py                               |   9 +-
@@ -94,7 +96,7 @@ suites fail exactly where the untouched image fails offline.
  .../gpu/spec_decode/dflash/speculator.py      |   9 +-
  .../gpu/spec_decode/rejection_sampler.py      |  97 +-
  vllm/v1/worker/gpu/warmup.py                  |  24 +-
- 31 files changed, 3912 insertions(+), 59 deletions(-)
+ 31 files changed, 3917 insertions(+), 59 deletions(-)
  create mode 100644 tests/v1/core/test_sink_draft_zero.py
  create mode 100644 tests/v1/worker/test_gpu_sink.py
  create mode 100644 vllm/v1/sample/sink.py
@@ -102,7 +104,7 @@ suites fail exactly where the untouched image fails offline.
 
 diff --git a/tests/v1/core/test_sink_draft_zero.py b/tests/v1/core/test_sink_draft_zero.py
 new file mode 100644
-index 000000000..d6f4d4bef
+index 000000000..0779dfdd4
 --- /dev/null
 +++ b/tests/v1/core/test_sink_draft_zero.py
 @@ -0,0 +1,912 @@
@@ -1016,14 +1018,14 @@ index 000000000..d6f4d4bef
 +def test_sink_config_threshold_default():
 +    config = SinkConfig.from_env()
 +    assert config is not None
-+    assert config.threshold == 50000.0
++    assert config.threshold == 85000.0
 +    assert config.rejection and config.num_alternates == 3
 diff --git a/tests/v1/worker/test_gpu_sink.py b/tests/v1/worker/test_gpu_sink.py
 new file mode 100644
-index 000000000..1382226a5
+index 000000000..4abf0b820
 --- /dev/null
 +++ b/tests/v1/worker/test_gpu_sink.py
-@@ -0,0 +1,893 @@
+@@ -0,0 +1,897 @@
 +# SPDX-License-Identifier: Apache-2.0
 +# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 +"""Sink rejection on the V2 runner's sampling layer, through the real kernels
@@ -1064,8 +1066,8 @@ index 000000000..1382226a5
 +)
 +
 +DEVICE = torch.device("cuda")
-+REJECTION = SinkConfig(column=2455, threshold=50000.0, rejection=True, max_retries=3)
-+DETECTOR = SinkConfig(column=2455, threshold=50000.0, rejection=False, max_retries=3)
++REJECTION = SinkConfig(column=2455, threshold=85000.0, rejection=True, max_retries=3)
++DETECTOR = SinkConfig(column=2455, threshold=85000.0, rejection=False, max_retries=3)
 +SUNK_VALUE = 108544.0
 +CLEAN_VALUE = 190.0
 +
@@ -1080,9 +1082,10 @@ index 000000000..1382226a5
 +
 +def test_flags_on_reference_numbers():
 +    """|residual[2455]| per stream at the sampled rows, from the reference
-+    runs (analysis/sink_column.txt): sunk rows 108,032 to 125,440, clean
-+    rows up to 10,688 (reasoning words the last layer writes into the
-+    column), the effort line's prompt sink 7,008, normal rows 153 to 270."""
++    runs and the served survey (analysis/sink_column.txt, survey/): sunk
++    rows 108,032 to 125,440, number tokens up to 62,720 with normal
++    predictions, reasoning words up to 10,688, the effort line's prompt sink
++    7,008, normal rows 153 to 270."""
 +    rows = {
 +        "say hi sunk ' can' (layer 38)": ([108032.0] * 4, True),
 +        "say hi sunk ' can'": ([-108544.0, 3.0, 4.0, 5.0], True),
@@ -1091,6 +1094,9 @@ index 000000000..1382226a5
 +        "clean ' friendly' (effort 50)": ([5500.0] * 4, False),
 +        "clean ' friendly' (9,984, effort 90)": ([9984.0, -9984.0, 1.0, 1.0], False),
 +        "clean max ' effectively' (10,688)": ([10688.0, 2.0, 3.0, 4.0], False),
++        "number ' ' before '1.0' (47,360)": ([47360.0, 1.0, 1.0, 1.0], False),
++        "number '202' in '2023' (51,968)": ([1.0, 51968.0, 1.0, 1.0], False),
++        "survey max ' ' before '1.3%' (62,720)": ([62720.0] * 4, False),
 +        "prompt ' (' sink": ([7008.0] * 4, False),
 +        "clean ' can'": ([190.0, 64.0, 120.0, 150.0], False),
 +        "clean ' help'": ([270.0] * 4, False),
@@ -2045,7 +2051,7 @@ index 704d6b245..cc25a4f96 100644
      completion_tokens_details: CompletionTokenUsageInfo | None = None
 +    sink_rejection: SinkUsageInfo | None = None
 diff --git a/vllm/envs.py b/vllm/envs.py
-index 2f320dfca..7f4eb9974 100755
+index 2f320dfca..194a0e0f4 100755
 --- a/vllm/envs.py
 +++ b/vllm/envs.py
 @@ -324,6 +324,11 @@ if TYPE_CHECKING:
@@ -2053,28 +2059,29 @@ index 2f320dfca..7f4eb9974 100755
      VLLM_COMPUTE_NANS_IN_LOGITS: bool = False
      VLLM_RAISE_ON_LOGIT_NANS: bool = False
 +    VLLM_SINK_DETECTOR_COLUMN: int = -1
-+    VLLM_SINK_DETECTOR_THRESHOLD: float = 50000.0
++    VLLM_SINK_DETECTOR_THRESHOLD: float = 85000.0
 +    VLLM_SINK_REJECTION: bool = False
 +    VLLM_SINK_REJECTION_MAX_RETRIES: int = 3
 +    VLLM_SINK_DETECTOR_CHECK_RANKS: bool = False
      VLLM_ROCM_QUICK_REDUCE_QUANTIZATION: Literal[
          "FP", "INT8", "INT6", "INT4", "INT3", "NONE"
      ] = "NONE"
-@@ -2180,6 +2185,34 @@ environment_variables: dict[str, Callable[[], Any]] = {
+@@ -2180,6 +2185,35 @@ environment_variables: dict[str, Callable[[], Any]] = {
      "VLLM_RAISE_ON_LOGIT_NANS": lambda: bool(
          int(os.getenv("VLLM_RAISE_ON_LOGIT_NANS", "0"))
      ),
 +    # Attention-sink detector: the column of the pre-norm residual watched at
 +    # every sampled row (DeepSeek V4.1 Flash: 2455, its BOS sink channel), and
 +    # the magnitude above which the row counts as sunk. -1 keeps the detector
-+    # off. Sunk rows carry 1.1e5 to 1.3e5 there; the largest clean row seen,
-+    # 10,688, is a reasoning word the last layer writes into the column
++    # off. Sunk rows carry 108,032 to 125,440 there on DeepSeek's reference
++    # and 116,736 to 118,784 served; ordinary text peaked at 62,720 (number
++    # tokens) over a 358,785-token survey. 85,000 is the geometric midpoint
 +    # (experiments/2026-10-19-sink-rejection-v2 in spark-ds41f).
 +    "VLLM_SINK_DETECTOR_COLUMN": lambda: int(
 +        os.getenv("VLLM_SINK_DETECTOR_COLUMN", "-1")
 +    ),
 +    "VLLM_SINK_DETECTOR_THRESHOLD": lambda: float(
-+        os.getenv("VLLM_SINK_DETECTOR_THRESHOLD", "50000")
++        os.getenv("VLLM_SINK_DETECTOR_THRESHOLD", "85000")
 +    ),
 +    # Never commit a token sampled from a sunk row: each step's last sampled
 +    # token is verified by the request's next step as draft zero and replaced
@@ -2095,7 +2102,7 @@ index 2f320dfca..7f4eb9974 100755
      # Timeout (in seconds) for MooncakeConnector in PD disaggregated setup.
      "VLLM_MOONCAKE_ABORT_REQUEST_TIMEOUT": lambda: int(
          os.getenv("VLLM_MOONCAKE_ABORT_REQUEST_TIMEOUT", "480")
-@@ -2763,6 +2796,12 @@ def compile_factors() -> dict[str, object]:
+@@ -2763,6 +2797,12 @@ def compile_factors() -> dict[str, object]:
          "CUDA_VISIBLE_DEVICES",
          "NO_COLOR",
          "VLLM_SKIP_VERSION_SUFFIX",

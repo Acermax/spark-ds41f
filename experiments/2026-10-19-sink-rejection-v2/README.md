@@ -6,7 +6,7 @@ token, with the forward pass untouched. v1 of the candidate (record on the local
 rollback. A read-only review the same day found the rollback unsafe. This record rebuilds the
 correction on the speculative-decoding machinery.
 
-**Status:** vLLM branch `sink-rejection-v2`, one commit on `r6x-candidate` f3b58ed9d (0d63e52a3), in
+**Status:** vLLM branch `sink-rejection-v2`, one commit on `r6x-candidate` f3b58ed9d (616d1a28d), in
 ~/projects/vllm-ds41-sink-rejection; the series patch
 [vllm/0221-Sink-detector-and-draft-zero-rejection.patch](vllm/0221-Sink-detector-and-draft-zero-rejection.patch)
 (provisional number 0221, replacing v1's 0221; one patch onto `r6x-candidate` f3b58ed9d).
@@ -16,10 +16,10 @@ CPU tests and dgx4's own GPU pass ([runs/tests.txt](runs/tests.txt)). **Screened
 on 2026-10-19 ([Screen](#screen-owner-2026-10-19-a-short-screen-first-then-the-gate)): not
 release-ready.** Speed is r6x's, time to first token grows by one decode step, and the correction
 removes the `Say hi.` / `Thanks!` collapse with every rank flagging the same rows. But the 50,000
-threshold also flags ordinary number tokens: 2 of the screen's 128 greedy responses changed. The
-reference puts those rows at 47,360 and 51,968 with normal predictions, and real sink rows at
-108,000-125,000; the threshold has to move (80,000 is the midpoint candidate) and be surveyed on
-broader text before the gate.
+threshold also flagged ordinary number tokens: 2 of the screen's 128 greedy responses changed. A
+survey of 358,785 served tokens ([Survey](#survey-owner-2026-10-20-survey-high-rows-then-set-the-threshold-from-the-data))
+puts ordinary text at most at 62,720 and the collapse rows at 116,736-118,784; the threshold is now
+85,000 (616d1a28d), and the screen runs again (`-screen3`, `-probes3`).
 
 ## What v1 got wrong, and what v2 does instead
 
@@ -130,7 +130,7 @@ so the detector-only and rejection arms share one compiled artifact.
 
 ## The threshold
 
-**Superseded by the screen (below):** the analysis here saw only short chat answers, whose largest
+**Superseded by the screen and the survey (below; threshold now 85,000):** the analysis here saw only short chat answers, whose largest
 clean row was 10,688. On longer reasoning text, number tokens (a lone space before digits, `202`)
 reach 47,360-51,968 in the reference with confident, correct predictions, and the engine's own
 numerics put one of them over 50,000. Rows at 115,712-124,416 (prompt words) predict like BOS.
@@ -197,6 +197,7 @@ The GPU gate measures the step cost.
 | v2, 2334b92c0 (the column capture in the SM120 model) | 5,069 | 2,073 / 59 (29 files) | 1,752 |
 | v2, e1c474dca (warmup rows neither logged nor counted) | 5,126 | 2,083 / 59 (29 files) | 1,791 |
 | v2, 0d63e52a3 (each event logs its largest flagged value) | 5,164 | 2,107 / 59 (29 files) | 1,805 |
+| v2, 616d1a28d (threshold 85,000 from the survey) | 5,171 | 2,108 / 59 (29 files) | 1,809 |
 
 Cut from the first build, with the same tests passing: the flags, the cut and the merge of the
 candidates became torch operations (three Triton kernels and their warmup declarations gone; the
@@ -232,7 +233,7 @@ fail in the image as built.
 
 [screen.json](screen.json) then [probes.json](probes.json), queued into one lab window on the TP3
 triangle. The arms mount the candidate's 29
-changed vLLM files ([overlay/](overlay), now vLLM 0d63e52a3; the screen ran 2334b92c0) over the r6x
+changed vLLM files ([overlay/](overlay), now vLLM 616d1a28d; the screen ran 2334b92c0) over the r6x
 image, whose tree is the
 candidate's base: every change is Python, so this is the candidate's image.
 
@@ -324,6 +325,37 @@ thinking high, 1,024 tokens each at 8 streams. It joins every `Sink:` line to it
 tokens around the flagged position. The highest normal rows then go through DeepSeek's CPU reference
 (as [analysis/false_positive_rows.txt](analysis/false_positive_rows.txt)) to read their predictions.
 
+### Survey results (run `-survey`, 2026-10-20 06:39-07:21 UTC, vLLM 0d63e52a3)
+
+[runs/survey/](runs/survey) holds the three outputs; [analysis/survey_tail.py](analysis/survey_tail.py)
+gives [analysis/survey_tail.txt](analysis/survey_tail.txt). The first boot at 06:36 was stopped by
+dgx1's startup memory guard (MemAvailable 34 MB under its 5 GiB floor); the immediate retry booted in
+91.8 s.
+
+| ordinary text, 358,785 tokens (384 responses) | 20,000 | 30,000 | 40,000 | 50,000 | 60,000 | 70,000 |
+|---|---|---|---|---|---|---|
+| rows at or above | 526 | 285 | 116 | 24 | 3 | 0 |
+
+- **Ordinary text peaks at 62,720** ("H2‖ 1.3%"), then 61,184 (`max‖_n=2`) and 60,928 ("structure
+  ‖3-4 paragraphs"). Every row above 50,000 is a number context: times, amounts, percentages,
+  `NUMERIC(8,2)`, ranges.
+- **The collapse rows read 116,736-118,784 served** (`Say hi.`, `Thanks!`, `ok`), and nothing else
+  in the probes reaches 20,000.
+- **The tail falls about 8x per 10,000** from 50,000 to 60,000. If it keeps falling so, a threshold
+  of 80,000 flags about one ordinary row per 8 M generated tokens, 85,000 one per 22 M, 90,000 one
+  per 61 M.
+- **DeepSeek's reference on the top row** (x203, greedy, reproduced on production r6x; teacher-forced,
+  [analysis/case-x203.json](analysis/case-x203.json)): the row is the lone space before `1.3%`
+  (reply token 688) and predicts `1` at -0.23; the reply's other high rows (spaces before digits,
+  reference 33,280-46,848) predict their digits as confidently. The reference reads that row at
+  38,912 against the served 62,720: on number rows served values ran 1.1-1.6x the reference's here.
+  The threshold is therefore set on served values, where both the ordinary tail and the collapse
+  rows (116,736-118,784) were measured.
+
+**Threshold: 85,000** (vLLM 616d1a28d), the geometric midpoint between the largest ordinary row
+(62,720) and the smallest sunk row seen anywhere (108,032, DeepSeek's reference): about 1.35x of
+margin on each side.
+
 ## Planned GPU gate (waits for a new threshold and its survey)
 
 Build the image from the series with this 0221, then one lab window on the TP3 triangle with three
@@ -370,10 +402,9 @@ column is part of the compile cache key.
 
 ## Open
 
-- **The threshold.** 50,000 flags ordinary number tokens (above). Next: a survey of high rows on
-  longer, varied text (a debug log of each flagged row's value on a detector-only arm, or more
-  reference runs), then a threshold between the largest normal row and the smallest sink row
-  (80,000 sits midway in today's data), then the gate.
+- **The threshold** is 85,000 from a 358,785-token survey: about one false positive per 22 M tokens
+  if the tail keeps falling as measured, and 0.73x of the smallest served collapse row. Three served
+  collapse rows is a small sample of the sink side.
 - The per-rank counts read 2 draft-zero rows more than the scheduler's on both probe arms; check that
   they are the discarded in-flight steps of finished requests.
 

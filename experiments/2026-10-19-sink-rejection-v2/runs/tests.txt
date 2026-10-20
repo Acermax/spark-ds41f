@@ -6,7 +6,7 @@ facebook/opt-125m's json/txt files (fetched for v1) mounted for the scheduler su
 --confcutdir=tests/v1 skips the root conftest (tblib is not in the image). dgx4's own GB10 for the GPU
 runs; no cluster node touched. Logs on dgx4: ~/spark-lab/sink-rejection-v2/logs.
 
-Final runs (cpu-8.log, gpu-7.log; vLLM sink-rejection-v2 at 0d63e52a3, one commit on f3b58ed9d)
+Final runs (cpu-9.log, gpu-8.log; vLLM sink-rejection-v2 at 616d1a28d, one commit on f3b58ed9d)
 
   run-tests.sh cpu
     tests/v1/core/test_sink_draft_zero.py (new; scheduler and frontend, sync and async)   43 passed
@@ -60,7 +60,7 @@ The new suites cover:
     (greedy, greedy, random) whose neighbours commit the same tokens and end in the same request
     state as without the sink.
 
-e1c474dca (cpu-7.log, gpu-6.log), 2334b92c0 (cpu-6.log, gpu-5.log, 17 GPU tests), 7f4c7dc8e (cpu-5.log, gpu-4.log), whose column
+0d63e52a3 (cpu-8.log, gpu-7.log), e1c474dca (cpu-7.log, gpu-6.log), 2334b92c0 (cpu-6.log, gpu-5.log, 17 GPU tests), 7f4c7dc8e (cpu-5.log, gpu-4.log), whose column
 capture sat in the generic V4.1 model, and the
 first build, ad9059483 (cpu-3.log, gpu-2.log), gave the same results; so did the slimmed
 tree before a docstring-only edit (cpu-4.log, gpu-3.log).
