@@ -1,6 +1,6 @@
 {
  "experiment": "experiments/2026-10-19-sink-rejection-v2",
- "run": "sink-rejection-v2-screen2",
+ "run": "sink-rejection-v2-screen3",
  "jobs": [
   {
    "kind": "sync"

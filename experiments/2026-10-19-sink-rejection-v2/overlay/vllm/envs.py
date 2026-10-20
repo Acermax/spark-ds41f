@@ -325,7 +325,7 @@ if TYPE_CHECKING:
     VLLM_COMPUTE_NANS_IN_LOGITS: bool = False
     VLLM_RAISE_ON_LOGIT_NANS: bool = False
     VLLM_SINK_DETECTOR_COLUMN: int = -1
-    VLLM_SINK_DETECTOR_THRESHOLD: float = 50000.0
+    VLLM_SINK_DETECTOR_THRESHOLD: float = 85000.0
     VLLM_SINK_REJECTION: bool = False
     VLLM_SINK_REJECTION_MAX_RETRIES: int = 3
     VLLM_SINK_DETECTOR_CHECK_RANKS: bool = False
@@ -2188,14 +2188,15 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Attention-sink detector: the column of the pre-norm residual watched at
     # every sampled row (DeepSeek V4.1 Flash: 2455, its BOS sink channel), and
     # the magnitude above which the row counts as sunk. -1 keeps the detector
-    # off. Sunk rows carry 1.1e5 to 1.3e5 there; the largest clean row seen,
-    # 10,688, is a reasoning word the last layer writes into the column
+    # off. Sunk rows carry 108,032 to 125,440 there on DeepSeek's reference
+    # and 116,736 to 118,784 served; ordinary text peaked at 62,720 (number
+    # tokens) over a 358,785-token survey. 85,000 is the geometric midpoint
     # (experiments/2026-10-19-sink-rejection-v2 in spark-ds41f).
     "VLLM_SINK_DETECTOR_COLUMN": lambda: int(
         os.getenv("VLLM_SINK_DETECTOR_COLUMN", "-1")
     ),
     "VLLM_SINK_DETECTOR_THRESHOLD": lambda: float(
-        os.getenv("VLLM_SINK_DETECTOR_THRESHOLD", "50000")
+        os.getenv("VLLM_SINK_DETECTOR_THRESHOLD", "85000")
     ),
     # Never commit a token sampled from a sunk row: each step's last sampled
     # token is verified by the request's next step as draft zero and replaced
