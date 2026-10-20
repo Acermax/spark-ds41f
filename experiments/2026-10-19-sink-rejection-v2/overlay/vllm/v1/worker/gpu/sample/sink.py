@@ -174,6 +174,7 @@ def _sink_policy_kernel(
         tl.store(events + 2, 0)
         tl.store(events + 3, -1)
         tl.store(events + 4, 0)
+        tl.store(events + 5, -1)
         return
 
     req_state_idx = tl.load(idx_mapping_ptr + req).to(tl.int64)
@@ -264,15 +265,19 @@ def _sink_policy_kernel(
         drafter_flags = accepted_flags
         cut_row = -1
     # The largest flagged value among the rows the step judged (up to the
-    # first rejected draft), for the log line.
+    # first rejected draft) and its row, for the log line.
     judged = row_flags & (rows <= num_sampled)
     row_values = tl.load(values_ptr + start + rows, mask=rows < num_logits, other=0.0)
-    value = tl.max(tl.where(judged, row_values, 0.0), axis=0)
+    value, value_row = tl.max(
+        tl.where(judged, row_values, -1.0), axis=0, return_indices=True
+    )
+    flagged_any = value >= 0.0
     tl.store(events + 0, outcome)
     tl.store(events + 1, tl.where(decoding, 0, 2))
     tl.store(events + 2, drafter_flags)
     tl.store(events + 3, cut_row)
-    tl.store(events + 4, value.to(tl.int32))
+    tl.store(events + 4, tl.where(flagged_any, value, 0.0).to(tl.int32))
+    tl.store(events + 5, tl.where(flagged_any, value_row, -1))
     tl.atomic_add(counts_ptr + 0, draft_zero_flag.to(tl.int64))
     tl.atomic_add(counts_ptr + 1, drafter_flags.to(tl.int64))
     tl.atomic_add(counts_ptr + 2, ((not decoding) & row0_flag).to(tl.int64))
