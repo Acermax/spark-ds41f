@@ -429,7 +429,30 @@ holding its value. Every served prompt and reply matched the reference's ids up 
   (62,720, now attributed) and the served collapse rows (116,736-118,784); the re-screen at 85,000 gives
   128/128 identical.
 
-## Planned GPU gate (waits for a new threshold and its survey)
+## GPU gate (owner, 2026-10-20: run the full gate; the grid settles the step cost)
+
+Threshold 85,000, vLLM 5ac8364ec (each `Sink:` line names its row). Three specs, queued into one window:
+
+- [gate-release.json](gate-release.json) (items 1, 5, 8 and the step cost): `release-tp3` with the
+  companions `single-stream`, `sampled` and [logprobs.json](logprobs.json) on
+  [correction-dev.json](correction-dev.json), [r6x-dev.json](r6x-dev.json),
+  [detector-dev.json](detector-dev.json) and correction again. The release suite's model step scores
+  every arm's text against the first; a read-only watcher on dgx1 records every `Sink:` line and the
+  `vllm:sink_*` counters per arm, which must stay at zero on the release prompts. The engine grid gives
+  each arm's step cost; it decides the two held optimizations (below, Open).
+- [gate-probes.json](gate-probes.json) (items 2, 3, 4, 6, and the speculation side of 7):
+  [probes.py](probes.py), [batch.py](batch.py) (the 16 probes alone, then at eight streams with
+  staggered arrivals: TP3 serves eight sequences, so eight streams stand in for the plan's sixteen),
+  [longctx.py](longctx.py) (`Say hi.` and `Thanks!` after a 64K- and a 512K-token conversation, the
+  same contexts on every arm, so r6x shows which still collapse) and [identity.py](identity.py), on
+  [correction-ranks.json](correction-ranks.json) (rank check on), [detector.json](detector.json) and r6x.
+- [gate-nospec.json](gate-nospec.json) (item 7): probes and identity on
+  [correction-nospec.json](correction-nospec.json), the correction arm without `--speculative-config`,
+  on port 8001 so returning agent traffic cannot reach it; [analysis/gate_identity.py](analysis/gate_identity.py)
+  compares its tokens with the speculative correction arm's.
+
+The items as first planned:
+
 
 Build the image from the series with this 0221, then one lab window on the TP3 triangle with three
 arms: **r6x**, **detector** (`VLLM_SINK_DETECTOR_COLUMN=2455`) and **correction** (also

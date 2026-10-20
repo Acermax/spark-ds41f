@@ -5,7 +5,7 @@ each answer with the response's usage.sink_rejection, then the server's sink cou
 (/metrics) and each rank's last "Sink detector, rank" log line. `Say hi.` and `Thanks!`
 collapse on r6x (`How can\\n can`, `there\\n there's`); the other 14 answer normally.
 
-Usage: python3 probes.py BASE_URL [--max-tokens N] [--nodes dgx1,dgx2,dgx3]
+Usage: python3 probes.py BASE_URL [--max-tokens N] [--nodes dgx1,dgx2,dgx3] [--port P]
 Prints one JSON line per prompt, then {"summary": ...} (lab.py keeps stdout).
 """
 
@@ -53,8 +53,11 @@ def main() -> None:
     parser.add_argument("base_url")
     parser.add_argument("--max-tokens", type=int, default=300)
     parser.add_argument("--nodes", default="dgx1,dgx2,dgx3")
+    parser.add_argument("--port", type=int, help="the arm's port, if not BASE_URL's (lab passes :8000)")
     args = parser.parse_args()
     base = args.base_url.rstrip("/")
+    if args.port:
+        base = base.rsplit(":", 1)[0] + f":{args.port}"
 
     rows = []
     for prompt in PROMPTS:
