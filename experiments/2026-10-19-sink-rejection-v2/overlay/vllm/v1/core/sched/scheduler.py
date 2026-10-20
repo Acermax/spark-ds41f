@@ -90,7 +90,7 @@ from vllm.v1.outputs import (
     ModelRunnerOutput,
 )
 from vllm.v1.request import Request, RequestStatus, StreamingUpdate
-from vllm.v1.sample.sink import SinkConfig, SinkEvent, SinkOutcome
+from vllm.v1.sample.sink import SinkConfig, SinkEvent, SinkOutcome, SinkRow
 from vllm.v1.spec_decode.dynamic.acceptance_length import (
     BatchSizeAcceptanceLengthController,
 )
@@ -4136,9 +4136,14 @@ class Scheduler(SchedulerInterface):
         if request.sink_metrics is None:
             request.sink_metrics = RequestSinkMetrics()
         request.sink_metrics.observe(event)
+        # Output position of row r's input: row 0 reads draft zero (the next
+        # output token) with rejection on, else the last committed token.
+        first = request.num_output_tokens
+        if not (self.sink_rejection and event.row0 == SinkRow.DRAFT_ZERO):
+            first -= 1
         logger.info(
             "Sink: request %s, next output position %d: %s row %s, %d drafter "
-            "row(s) flagged%s, value %d",
+            "row(s) flagged%s, value %d at output position %d (row %d)",
             request.request_id,
             request.num_output_tokens,
             event.row0.label,
@@ -4146,6 +4151,8 @@ class Scheduler(SchedulerInterface):
             event.num_drafter_flags,
             f", cut at row {event.cut_row}" if event.cut_row >= 0 else "",
             event.value,
+            first + event.value_row,
+            event.value_row,
         )
 
     def _sink_logprobs(

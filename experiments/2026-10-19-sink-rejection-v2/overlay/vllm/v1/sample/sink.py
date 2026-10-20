@@ -28,7 +28,7 @@ from enum import IntEnum
 import vllm.envs as envs
 
 # Fields of a request's per-step sink event, as the worker encodes them.
-NUM_SINK_EVENT_FIELDS = 5
+NUM_SINK_EVENT_FIELDS = 6
 
 
 class SinkOutcome(IntEnum):
@@ -121,8 +121,10 @@ class SinkEvent:
     # distribution that produced the replaced token (None without logprobs).
     recovered_logprob: float | None = None
     recovered_rank: int | None = None
-    # The largest |residual[column]| among the flagged rows.
+    # The largest |residual[column]| among the flagged rows, and its row in
+    # the request's step (0: the step's first input; -1: none).
     value: int = 0
+    value_row: int = -1
 
     @property
     def flagged_row0(self) -> bool:
@@ -141,9 +143,8 @@ def events_to_dict(
 ) -> dict[str, SinkEvent] | None:
     """The host form: request id -> event, for the requests with one."""
     result: dict[str, SinkEvent] = {}
-    for i, (req_id, (outcome, row0, num_drafter_flags, cut_row, value)) in enumerate(
-        zip(req_ids, events)
-    ):
+    for i, (req_id, fields) in enumerate(zip(req_ids, events)):
+        outcome, row0, num_drafter_flags, cut_row, value, value_row = fields
         if outcome == SinkOutcome.NONE and num_drafter_flags == 0:
             continue
         rejected = outcome == SinkOutcome.REJECTED
@@ -153,6 +154,7 @@ def events_to_dict(
             num_drafter_flags=int(num_drafter_flags),
             cut_row=int(cut_row),
             value=int(value),
+            value_row=int(value_row),
             recovered_logprob=(
                 float(recovered_logprobs[i])
                 if rejected and recovered_logprobs is not None

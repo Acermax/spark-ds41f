@@ -1,6 +1,6 @@
-From 616d1a28df1c6c3589f45cd2e54dfb88db129541 Mon Sep 17 00:00:00 2001
+From 5ac8364ece33a65a08b852a47d1ceb02a09154f4 Mon Sep 17 00:00:00 2001
 From: Christopher Owen <3221756+christopherowen@users.noreply.github.com>
-Date: Tue, 20 Oct 2026 09:30:15 +0200
+Date: Tue, 20 Oct 2026 10:17:40 +0200
 Subject: [PATCH] Sink detector and draft-zero rejection: verify each step's
  last sampled token as draft zero of the next
 
@@ -46,7 +46,8 @@ only). The sampling-only settings stay out of the compile cache key.
 
 Surfaced as vllm:sink_flagged_rows{row=draft_zero|drafter|prompt},
 vllm:sink_draft_zero_rejections, vllm:sink_draft_cuts, vllm:sink_fallthroughs, the periodic
-stats line, a scheduler log line per event (with the largest flagged |column| value), per-rank counts in each worker's log, and
+stats line, a scheduler log line per event (the largest flagged |column| value and the output
+position of its row), per-rank counts in each worker's log, and
 usage.sink_rejection on every response with the detector on. The V2 runner refuses
 rejection with the features it does not handle (pipeline parallelism, batch-sharded
 sampling, PCP, DBO, other drafters, probabilistic drafts, watermarking, sampling masks,
@@ -65,8 +66,8 @@ rejection sampler (greedy and random, block verification) with its batch neighbo
 unchanged. The tokenizer, parser, sampling, verification, drafter-input and scheduler
 suites fail exactly where the untouched image fails offline.
 ---
- tests/v1/core/test_sink_draft_zero.py         | 912 ++++++++++++++++++
- tests/v1/worker/test_gpu_sink.py              | 897 +++++++++++++++++
+ tests/v1/core/test_sink_draft_zero.py         | 945 ++++++++++++++++++
+ tests/v1/worker/test_gpu_sink.py              | 919 +++++++++++++++++
  vllm/entrypoints/generate/base/serving.py     |  23 +-
  .../openai/chat_completion/serving.py         |   3 +
  vllm/entrypoints/openai/completion/serving.py |   3 +
@@ -77,7 +78,7 @@ suites fail exactly where the untouched image fails offline.
  vllm/outputs.py                               |   9 +-
  vllm/v1/core/sched/async_scheduler.py         |  38 +-
  vllm/v1/core/sched/output.py                  |   5 +
- vllm/v1/core/sched/scheduler.py               | 312 +++++-
+ vllm/v1/core/sched/scheduler.py               | 319 +++++-
  vllm/v1/core/sched/utils.py                   |  14 +
  vllm/v1/engine/__init__.py                    |   5 +
  vllm/v1/engine/output_processor.py            |   7 +
@@ -85,18 +86,18 @@ suites fail exactly where the untouched image fails offline.
  vllm/v1/metrics/stats.py                      |  67 ++
  vllm/v1/outputs.py                            |   5 +
  vllm/v1/request.py                            |  21 +-
- vllm/v1/sample/sink.py                        | 167 ++++
+ vllm/v1/sample/sink.py                        | 169 ++++
  vllm/v1/structured_output/__init__.py         |  16 +-
  vllm/v1/worker/gpu/async_utils.py             |  35 +-
- vllm/v1/worker/gpu/model_runner.py            | 270 +++++-
+ vllm/v1/worker/gpu/model_runner.py            | 270 ++++-
  vllm/v1/worker/gpu/sample/gumbel.py           |  32 +-
  vllm/v1/worker/gpu/sample/output.py           |   9 +-
  vllm/v1/worker/gpu/sample/sampler.py          |  31 +
- vllm/v1/worker/gpu/sample/sink.py             | 799 +++++++++++++++
+ vllm/v1/worker/gpu/sample/sink.py             | 804 +++++++++++++++
  .../gpu/spec_decode/dflash/speculator.py      |   9 +-
  .../gpu/spec_decode/rejection_sampler.py      |  97 +-
  vllm/v1/worker/gpu/warmup.py                  |  24 +-
- 31 files changed, 3917 insertions(+), 59 deletions(-)
+ 31 files changed, 3986 insertions(+), 59 deletions(-)
  create mode 100644 tests/v1/core/test_sink_draft_zero.py
  create mode 100644 tests/v1/worker/test_gpu_sink.py
  create mode 100644 vllm/v1/sample/sink.py
@@ -104,10 +105,10 @@ suites fail exactly where the untouched image fails offline.
 
 diff --git a/tests/v1/core/test_sink_draft_zero.py b/tests/v1/core/test_sink_draft_zero.py
 new file mode 100644
-index 000000000..0779dfdd4
+index 000000000..6256c0a1a
 --- /dev/null
 +++ b/tests/v1/core/test_sink_draft_zero.py
-@@ -0,0 +1,912 @@
+@@ -0,0 +1,945 @@
 +# SPDX-License-Identifier: Apache-2.0
 +# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 +"""Sink rejection in the scheduler: the provisional token as draft zero.
@@ -1020,12 +1021,45 @@ index 000000000..0779dfdd4
 +    assert config is not None
 +    assert config.threshold == 85000.0
 +    assert config.rejection and config.num_alternates == 3
++
++
++@pytest.mark.parametrize("rejection", [False, True])
++def test_sink_log_names_the_flagged_rows_position(
++    monkeypatch: pytest.MonkeyPatch, rejection: bool
++):
++    """The Sink: line gives the largest flagged value with the output position
++    of its own row: row r reads output token first + r, where first is draft
++    zero (the next output token) with rejection on, else the last committed
++    token. Here row 0 is clean and drafter row 1 holds the value."""
++    from types import SimpleNamespace
++
++    from vllm.v1.core.sched import scheduler as scheduler_module
++    from vllm.v1.metrics.stats import SinkStats
++
++    lines: list[str] = []
++    monkeypatch.setattr(
++        scheduler_module.logger,
++        "info",
++        lambda message, *args: lines.append(message % args),
++    )
++    scheduler = _scheduler(False, 5)
++    scheduler.sink_rejection = rejection
++    request = SimpleNamespace(request_id="r", num_output_tokens=688, sink_metrics=None)
++    event = SinkEvent(
++        SinkOutcome.NONE, SinkRow.DRAFT_ZERO, 1, -1, value=62720, value_row=1
++    )
++    scheduler._observe_sink_event(request, event, SinkStats())
++    position = 689 if rejection else 688
++    assert lines == [
++        "Sink: request r, next output position 688: draft_zero row none, "
++        f"1 drafter row(s) flagged, value 62720 at output position {position} (row 1)"
++    ]
 diff --git a/tests/v1/worker/test_gpu_sink.py b/tests/v1/worker/test_gpu_sink.py
 new file mode 100644
-index 000000000..4abf0b820
+index 000000000..2136324d0
 --- /dev/null
 +++ b/tests/v1/worker/test_gpu_sink.py
-@@ -0,0 +1,897 @@
+@@ -0,0 +1,919 @@
 +# SPDX-License-Identifier: Apache-2.0
 +# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 +"""Sink rejection on the V2 runner's sampling layer, through the real kernels
@@ -1460,9 +1494,31 @@ index 000000000..4abf0b820
 +    # A sunk committed token and a sunk accepted draft, counted, with the
 +    # largest flagged value for the log line; nothing flagged in request 2.
 +    events = r.out.events.tolist()
-+    assert events[0] == [SinkOutcome.FLAGGED, SinkRow.DRAFT_ZERO, 1, -1, 70500]
-+    assert events[1] == [SinkOutcome.NONE, SinkRow.DRAFT_ZERO, 0, -1, 0]
++    assert events[0] == [SinkOutcome.FLAGGED, SinkRow.DRAFT_ZERO, 1, -1, 70500, 1]
++    assert events[1] == [SinkOutcome.NONE, SinkRow.DRAFT_ZERO, 0, -1, 0, -1]
 +    assert sink.counts.tolist() == [1, 1, 0]
++
++
++def test_event_names_the_row_of_its_value():
++    """Row 0 clean and a later drafter row flagged: the event's value is
++    that row's and names it; a flagged row past the first rejected draft is
++    not judged."""
++    sink = _sink(DETECTOR)
++    case = PolicyCase(
++        sampled=[[31, 32, 33], [41]],
++        num_sampled=[3, 1],
++        rows=[3, 3],
++        decoding=[1, 1],
++        flags=[0, 0, 1, 0, 0, 1],
++        drafts=[30, 31, 32, 40, 41, 42],
++        new_alternates=[],
++    )
++    r = _apply(sink, case, values=[9.0, 40000.0, 90000.0, 7.0, 8.0, 95000.0])
++    events = r.out.events.tolist()
++    assert events[0] == [SinkOutcome.NONE, SinkRow.DRAFT_ZERO, 1, -1, 90000, 2]
++    # Request 2 accepted no draft: its flagged row 2 lies past row 1, the
++    # first rejected draft, so nothing is judged flagged.
++    assert events[1] == [SinkOutcome.NONE, SinkRow.DRAFT_ZERO, 0, -1, 0, -1]
 +
 +
 +def test_warmup_rows_are_neither_logged_nor_kept(monkeypatch: pytest.MonkeyPatch):
@@ -2325,7 +2381,7 @@ index bdb08e48d..412f1233d 100644
      # None identifies a transfer-only or otherwise empty model step.
      compute_service_class: ComputeServiceClass | None = None
 diff --git a/vllm/v1/core/sched/scheduler.py b/vllm/v1/core/sched/scheduler.py
-index 9f2c112f7..6190cf5a6 100644
+index 9f2c112f7..7a6de6003 100644
 --- a/vllm/v1/core/sched/scheduler.py
 +++ b/vllm/v1/core/sched/scheduler.py
 @@ -8,6 +8,8 @@ from collections.abc import Iterable
@@ -2363,7 +2419,7 @@ index 9f2c112f7..6190cf5a6 100644
  )
 -from vllm.v1.outputs import DraftTokenIds, KVConnectorOutput, ModelRunnerOutput
  from vllm.v1.request import Request, RequestStatus, StreamingUpdate
-+from vllm.v1.sample.sink import SinkConfig, SinkEvent, SinkOutcome
++from vllm.v1.sample.sink import SinkConfig, SinkEvent, SinkOutcome, SinkRow
  from vllm.v1.spec_decode.dynamic.acceptance_length import (
      BatchSizeAcceptanceLengthController,
  )
@@ -2779,7 +2835,7 @@ index 9f2c112f7..6190cf5a6 100644
              kv_connector_stats=connector_stats_payload,
              cudagraph_stats=cudagraph_stats,
              perf_stats=perf_stats,
-@@ -3940,6 +4128,74 @@ class Scheduler(SchedulerInterface):
+@@ -3940,6 +4128,81 @@ class Scheduler(SchedulerInterface):
              local_prefill_backlog_tokens=local_prefill_backlog_tokens,
          )
  
@@ -2791,9 +2847,14 @@ index 9f2c112f7..6190cf5a6 100644
 +        if request.sink_metrics is None:
 +            request.sink_metrics = RequestSinkMetrics()
 +        request.sink_metrics.observe(event)
++        # Output position of row r's input: row 0 reads draft zero (the next
++        # output token) with rejection on, else the last committed token.
++        first = request.num_output_tokens
++        if not (self.sink_rejection and event.row0 == SinkRow.DRAFT_ZERO):
++            first -= 1
 +        logger.info(
 +            "Sink: request %s, next output position %d: %s row %s, %d drafter "
-+            "row(s) flagged%s, value %d",
++            "row(s) flagged%s, value %d at output position %d (row %d)",
 +            request.request_id,
 +            request.num_output_tokens,
 +            event.row0.label,
@@ -2801,6 +2862,8 @@ index 9f2c112f7..6190cf5a6 100644
 +            event.num_drafter_flags,
 +            f", cut at row {event.cut_row}" if event.cut_row >= 0 else "",
 +            event.value,
++            first + event.value_row,
++            event.value_row,
 +        )
 +
 +    def _sink_logprobs(
@@ -3226,10 +3289,10 @@ index 4a129136e..519bc4aaa 100644
          # Store the block hasher without binding self to avoid creating a
 diff --git a/vllm/v1/sample/sink.py b/vllm/v1/sample/sink.py
 new file mode 100644
-index 000000000..e62cd2d71
+index 000000000..32533820a
 --- /dev/null
 +++ b/vllm/v1/sample/sink.py
-@@ -0,0 +1,167 @@
+@@ -0,0 +1,169 @@
 +# SPDX-License-Identifier: Apache-2.0
 +# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 +"""Attention-sink detection and rejection: configuration and host-side events.
@@ -3260,7 +3323,7 @@ index 000000000..e62cd2d71
 +import vllm.envs as envs
 +
 +# Fields of a request's per-step sink event, as the worker encodes them.
-+NUM_SINK_EVENT_FIELDS = 5
++NUM_SINK_EVENT_FIELDS = 6
 +
 +
 +class SinkOutcome(IntEnum):
@@ -3353,8 +3416,10 @@ index 000000000..e62cd2d71
 +    # distribution that produced the replaced token (None without logprobs).
 +    recovered_logprob: float | None = None
 +    recovered_rank: int | None = None
-+    # The largest |residual[column]| among the flagged rows.
++    # The largest |residual[column]| among the flagged rows, and its row in
++    # the request's step (0: the step's first input; -1: none).
 +    value: int = 0
++    value_row: int = -1
 +
 +    @property
 +    def flagged_row0(self) -> bool:
@@ -3373,9 +3438,8 @@ index 000000000..e62cd2d71
 +) -> dict[str, SinkEvent] | None:
 +    """The host form: request id -> event, for the requests with one."""
 +    result: dict[str, SinkEvent] = {}
-+    for i, (req_id, (outcome, row0, num_drafter_flags, cut_row, value)) in enumerate(
-+        zip(req_ids, events)
-+    ):
++    for i, (req_id, fields) in enumerate(zip(req_ids, events)):
++        outcome, row0, num_drafter_flags, cut_row, value, value_row = fields
 +        if outcome == SinkOutcome.NONE and num_drafter_flags == 0:
 +            continue
 +        rejected = outcome == SinkOutcome.REJECTED
@@ -3385,6 +3449,7 @@ index 000000000..e62cd2d71
 +            num_drafter_flags=int(num_drafter_flags),
 +            cut_row=int(cut_row),
 +            value=int(value),
++            value_row=int(value_row),
 +            recovered_logprob=(
 +                float(recovered_logprobs[i])
 +                if rejected and recovered_logprobs is not None
@@ -4057,10 +4122,10 @@ index c9abf4652..187fafa7a 100644
  
 diff --git a/vllm/v1/worker/gpu/sample/sink.py b/vllm/v1/worker/gpu/sample/sink.py
 new file mode 100644
-index 000000000..a1a17162b
+index 000000000..12b60aaa1
 --- /dev/null
 +++ b/vllm/v1/worker/gpu/sample/sink.py
-@@ -0,0 +1,799 @@
+@@ -0,0 +1,804 @@
 +# SPDX-License-Identifier: Apache-2.0
 +# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 +"""The attention-sink detector and draft-zero rejection on the V2 model runner
@@ -4237,6 +4302,7 @@ index 000000000..a1a17162b
 +        tl.store(events + 2, 0)
 +        tl.store(events + 3, -1)
 +        tl.store(events + 4, 0)
++        tl.store(events + 5, -1)
 +        return
 +
 +    req_state_idx = tl.load(idx_mapping_ptr + req).to(tl.int64)
@@ -4327,15 +4393,19 @@ index 000000000..a1a17162b
 +        drafter_flags = accepted_flags
 +        cut_row = -1
 +    # The largest flagged value among the rows the step judged (up to the
-+    # first rejected draft), for the log line.
++    # first rejected draft) and its row, for the log line.
 +    judged = row_flags & (rows <= num_sampled)
 +    row_values = tl.load(values_ptr + start + rows, mask=rows < num_logits, other=0.0)
-+    value = tl.max(tl.where(judged, row_values, 0.0), axis=0)
++    value, value_row = tl.max(
++        tl.where(judged, row_values, -1.0), axis=0, return_indices=True
++    )
++    flagged_any = value >= 0.0
 +    tl.store(events + 0, outcome)
 +    tl.store(events + 1, tl.where(decoding, 0, 2))
 +    tl.store(events + 2, drafter_flags)
 +    tl.store(events + 3, cut_row)
-+    tl.store(events + 4, value.to(tl.int32))
++    tl.store(events + 4, tl.where(flagged_any, value, 0.0).to(tl.int32))
++    tl.store(events + 5, tl.where(flagged_any, value_row, -1))
 +    tl.atomic_add(counts_ptr + 0, draft_zero_flag.to(tl.int64))
 +    tl.atomic_add(counts_ptr + 1, drafter_flags.to(tl.int64))
 +    tl.atomic_add(counts_ptr + 2, ((not decoding) & row0_flag).to(tl.int64))
