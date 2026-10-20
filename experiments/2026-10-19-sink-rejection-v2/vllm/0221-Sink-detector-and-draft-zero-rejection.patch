@@ -1,6 +1,6 @@
-From e1c474dca31fdfe6831ec1b9968a1a743fd3eefc Mon Sep 17 00:00:00 2001
+From 0d63e52a3fce860b829ff828917c6174dda44dba Mon Sep 17 00:00:00 2001
 From: Christopher Owen <3221756+christopherowen@users.noreply.github.com>
-Date: Tue, 20 Oct 2026 00:16:32 +0200
+Date: Tue, 20 Oct 2026 08:28:46 +0200
 Subject: [PATCH] Sink detector and draft-zero rejection: verify each step's
  last sampled token as draft zero of the next
 
@@ -44,7 +44,7 @@ step (lab only). The sampling-only settings stay out of the compile cache key.
 
 Surfaced as vllm:sink_flagged_rows{row=draft_zero|drafter|prompt},
 vllm:sink_draft_zero_rejections, vllm:sink_draft_cuts, vllm:sink_fallthroughs, the periodic
-stats line, a scheduler log line per event, per-rank counts in each worker's log, and
+stats line, a scheduler log line per event (with the largest flagged |column| value), per-rank counts in each worker's log, and
 usage.sink_rejection on every response with the detector on. The V2 runner refuses
 rejection with the features it does not handle (pipeline parallelism, batch-sharded
 sampling, PCP, DBO, other drafters, probabilistic drafts, watermarking, sampling masks,
@@ -64,7 +64,7 @@ unchanged. The tokenizer, parser, sampling, verification, drafter-input and sche
 suites fail exactly where the untouched image fails offline.
 ---
  tests/v1/core/test_sink_draft_zero.py         | 912 ++++++++++++++++++
- tests/v1/worker/test_gpu_sink.py              | 879 +++++++++++++++++
+ tests/v1/worker/test_gpu_sink.py              | 893 +++++++++++++++++
  vllm/entrypoints/generate/base/serving.py     |  23 +-
  .../openai/chat_completion/serving.py         |   3 +
  vllm/entrypoints/openai/completion/serving.py |   3 +
@@ -75,7 +75,7 @@ suites fail exactly where the untouched image fails offline.
  vllm/outputs.py                               |   9 +-
  vllm/v1/core/sched/async_scheduler.py         |  38 +-
  vllm/v1/core/sched/output.py                  |   5 +
- vllm/v1/core/sched/scheduler.py               | 311 +++++-
+ vllm/v1/core/sched/scheduler.py               | 312 +++++-
  vllm/v1/core/sched/utils.py                   |  14 +
  vllm/v1/engine/__init__.py                    |   5 +
  vllm/v1/engine/output_processor.py            |   7 +
@@ -83,18 +83,18 @@ suites fail exactly where the untouched image fails offline.
  vllm/v1/metrics/stats.py                      |  67 ++
  vllm/v1/outputs.py                            |   5 +
  vllm/v1/request.py                            |  21 +-
- vllm/v1/sample/sink.py                        | 164 ++++
+ vllm/v1/sample/sink.py                        | 167 ++++
  vllm/v1/structured_output/__init__.py         |  16 +-
  vllm/v1/worker/gpu/async_utils.py             |  35 +-
  vllm/v1/worker/gpu/model_runner.py            | 270 +++++-
  vllm/v1/worker/gpu/sample/gumbel.py           |  32 +-
  vllm/v1/worker/gpu/sample/output.py           |   9 +-
  vllm/v1/worker/gpu/sample/sampler.py          |  31 +
- vllm/v1/worker/gpu/sample/sink.py             | 779 +++++++++++++++
+ vllm/v1/worker/gpu/sample/sink.py             | 799 +++++++++++++++
  .../gpu/spec_decode/dflash/speculator.py      |   9 +-
  .../gpu/spec_decode/rejection_sampler.py      |  97 +-
  vllm/v1/worker/gpu/warmup.py                  |  24 +-
- 31 files changed, 3874 insertions(+), 59 deletions(-)
+ 31 files changed, 3912 insertions(+), 59 deletions(-)
  create mode 100644 tests/v1/core/test_sink_draft_zero.py
  create mode 100644 tests/v1/worker/test_gpu_sink.py
  create mode 100644 vllm/v1/sample/sink.py
@@ -1020,10 +1020,10 @@ index 000000000..d6f4d4bef
 +    assert config.rejection and config.num_alternates == 3
 diff --git a/tests/v1/worker/test_gpu_sink.py b/tests/v1/worker/test_gpu_sink.py
 new file mode 100644
-index 000000000..41e8f6896
+index 000000000..1382226a5
 --- /dev/null
 +++ b/tests/v1/worker/test_gpu_sink.py
-@@ -0,0 +1,879 @@
+@@ -0,0 +1,893 @@
 +# SPDX-License-Identifier: Apache-2.0
 +# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 +"""Sink rejection on the V2 runner's sampling layer, through the real kernels
@@ -1098,8 +1098,13 @@ index 000000000..41e8f6896
 +    }
 +    columns = torch.tensor([v for v, _ in rows.values()], device=DEVICE)
 +    n = columns.shape[0]
-+    flags = _sink().flags(columns, torch.arange(n, device=DEVICE), _cu([n]), 1, None)
++    sink = _sink()
++    flags = sink.flags(columns, torch.arange(n, device=DEVICE), _cu([n]), 1, None)
 +    assert flags.tolist() == [int(f) for _, f in rows.values()]
++    # Each row's largest |value| over the streams (NaN reads 0), for the log.
++    assert sink.row_values.tolist() == [
++        0.0 if v[0] != v[0] else max(abs(x) for x in v) for v, _ in rows.values()
++    ]
 +    # Dead verification rows (past a request's live drafts) are never
 +    # flagged: their residual skipped routed MoE.
 +    flags = _sink().flags(
@@ -1269,7 +1274,12 @@ index 000000000..41e8f6896
 +    state: dict[int, tuple[list[int], int]] = field(default_factory=dict)
 +
 +
-+def _apply(sink: SinkSampler, case: PolicyCase, logprobs: bool = False):
++def _apply(
++    sink: SinkSampler,
++    case: PolicyCase,
++    logprobs: bool = False,
++    values: list[float] | None = None,
++):
 +    num_reqs = len(case.rows)
 +    width = sink.num_speculative_steps + 1
 +    sampled = torch.full((num_reqs, width), -7, dtype=torch.int64, device=DEVICE)
@@ -1310,6 +1320,7 @@ index 000000000..41e8f6896
 +        alternates,
 +        total_len,
 +        bin_counts,
++        None if values is None else torch.tensor(values, device=DEVICE),
 +    )
 +    return SimpleNamespace(
 +        out=out,
@@ -1390,7 +1401,7 @@ index 000000000..41e8f6896
 +    r = _apply(sink, case)
 +    # Past its alternates draft zero stands: committed, new alternates taken.
 +    assert _host_tokens(r) == [[40, 41]]
-+    assert r.out.events[0].tolist() == [SinkOutcome.FALLTHROUGH, 0, 0, -1]
++    assert r.out.events[0].tolist()[:4] == [SinkOutcome.FALLTHROUGH, 0, 0, -1]
 +    assert sink.tries[4].item() == 0
 +    # An impossible alternate (-1) also falls through.
 +    case.state = {4: ([-1, -1, -1], 0)}
@@ -1415,8 +1426,8 @@ index 000000000..41e8f6896
 +    r = _apply(sink, case)
 +    assert _host_tokens(r) == [[30, 31, 33], [41], []]
 +    events = r.out.events.tolist()
-+    assert events[0] == [SinkOutcome.NONE, SinkRow.DRAFT_ZERO, 1, 2]
-+    assert events[1] == [SinkOutcome.FLAGGED, SinkRow.PROMPT, 0, -1]
++    assert events[0][:4] == [SinkOutcome.NONE, SinkRow.DRAFT_ZERO, 1, 2]
++    assert events[1][:4] == [SinkOutcome.FLAGGED, SinkRow.PROMPT, 0, -1]
 +    assert events[2][0] == SinkOutcome.NONE and events[2][2] == 0
 +    assert sink.counts.tolist() == [0, 1, 1]
 +    # A finished prefill takes its draw's alternates; a chunk does not.
@@ -1435,13 +1446,16 @@ index 000000000..41e8f6896
 +        drafts=[30, 31, 32, 40],
 +        new_alternates=[],
 +    )
-+    r = _apply(sink, case)
++    r = _apply(sink, case, values=[61000.0, 70500.4, 12.0, 30.0])
 +    assert r.out.tokens is None
 +    assert r.num_sampled.tolist() == [2, 1]
 +    assert r.sampled[0, :2].tolist() == [31, 32]
 +    assert r.total_len[4].item() == 40
-+    # A sunk committed token and a sunk accepted draft, counted.
-+    assert r.out.events.tolist()[0] == [SinkOutcome.FLAGGED, SinkRow.DRAFT_ZERO, 1, -1]
++    # A sunk committed token and a sunk accepted draft, counted, with the
++    # largest flagged value for the log line; nothing flagged in request 2.
++    events = r.out.events.tolist()
++    assert events[0] == [SinkOutcome.FLAGGED, SinkRow.DRAFT_ZERO, 1, -1, 70500]
++    assert events[1] == [SinkOutcome.NONE, SinkRow.DRAFT_ZERO, 0, -1, 0]
 +    assert sink.counts.tolist() == [1, 1, 0]
 +
 +
@@ -2304,7 +2318,7 @@ index bdb08e48d..412f1233d 100644
      # None identifies a transfer-only or otherwise empty model step.
      compute_service_class: ComputeServiceClass | None = None
 diff --git a/vllm/v1/core/sched/scheduler.py b/vllm/v1/core/sched/scheduler.py
-index 9f2c112f7..41988acb7 100644
+index 9f2c112f7..6190cf5a6 100644
 --- a/vllm/v1/core/sched/scheduler.py
 +++ b/vllm/v1/core/sched/scheduler.py
 @@ -8,6 +8,8 @@ from collections.abc import Iterable
@@ -2758,7 +2772,7 @@ index 9f2c112f7..41988acb7 100644
              kv_connector_stats=connector_stats_payload,
              cudagraph_stats=cudagraph_stats,
              perf_stats=perf_stats,
-@@ -3940,6 +4128,73 @@ class Scheduler(SchedulerInterface):
+@@ -3940,6 +4128,74 @@ class Scheduler(SchedulerInterface):
              local_prefill_backlog_tokens=local_prefill_backlog_tokens,
          )
  
@@ -2772,13 +2786,14 @@ index 9f2c112f7..41988acb7 100644
 +        request.sink_metrics.observe(event)
 +        logger.info(
 +            "Sink: request %s, next output position %d: %s row %s, %d drafter "
-+            "row(s) flagged%s",
++            "row(s) flagged%s, value %d",
 +            request.request_id,
 +            request.num_output_tokens,
 +            event.row0.label,
 +            event.outcome.name.lower(),
 +            event.num_drafter_flags,
 +            f", cut at row {event.cut_row}" if event.cut_row >= 0 else "",
++            event.value,
 +        )
 +
 +    def _sink_logprobs(
@@ -3204,10 +3219,10 @@ index 4a129136e..519bc4aaa 100644
          # Store the block hasher without binding self to avoid creating a
 diff --git a/vllm/v1/sample/sink.py b/vllm/v1/sample/sink.py
 new file mode 100644
-index 000000000..a34035a9c
+index 000000000..e62cd2d71
 --- /dev/null
 +++ b/vllm/v1/sample/sink.py
-@@ -0,0 +1,164 @@
+@@ -0,0 +1,167 @@
 +# SPDX-License-Identifier: Apache-2.0
 +# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 +"""Attention-sink detection and rejection: configuration and host-side events.
@@ -3238,7 +3253,7 @@ index 000000000..a34035a9c
 +import vllm.envs as envs
 +
 +# Fields of a request's per-step sink event, as the worker encodes them.
-+NUM_SINK_EVENT_FIELDS = 4
++NUM_SINK_EVENT_FIELDS = 5
 +
 +
 +class SinkOutcome(IntEnum):
@@ -3331,6 +3346,8 @@ index 000000000..a34035a9c
 +    # distribution that produced the replaced token (None without logprobs).
 +    recovered_logprob: float | None = None
 +    recovered_rank: int | None = None
++    # The largest |residual[column]| among the flagged rows.
++    value: int = 0
 +
 +    @property
 +    def flagged_row0(self) -> bool:
@@ -3349,7 +3366,7 @@ index 000000000..a34035a9c
 +) -> dict[str, SinkEvent] | None:
 +    """The host form: request id -> event, for the requests with one."""
 +    result: dict[str, SinkEvent] = {}
-+    for i, (req_id, (outcome, row0, num_drafter_flags, cut_row)) in enumerate(
++    for i, (req_id, (outcome, row0, num_drafter_flags, cut_row, value)) in enumerate(
 +        zip(req_ids, events)
 +    ):
 +        if outcome == SinkOutcome.NONE and num_drafter_flags == 0:
@@ -3360,6 +3377,7 @@ index 000000000..a34035a9c
 +            row0=SinkRow(row0),
 +            num_drafter_flags=int(num_drafter_flags),
 +            cut_row=int(cut_row),
++            value=int(value),
 +            recovered_logprob=(
 +                float(recovered_logprobs[i])
 +                if rejected and recovered_logprobs is not None
@@ -4032,10 +4050,10 @@ index c9abf4652..187fafa7a 100644
  
 diff --git a/vllm/v1/worker/gpu/sample/sink.py b/vllm/v1/worker/gpu/sample/sink.py
 new file mode 100644
-index 000000000..7b5fb48e8
+index 000000000..a1a17162b
 --- /dev/null
 +++ b/vllm/v1/worker/gpu/sample/sink.py
-@@ -0,0 +1,779 @@
+@@ -0,0 +1,799 @@
 +# SPDX-License-Identifier: Apache-2.0
 +# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 +"""The attention-sink detector and draft-zero rejection on the V2 model runner
@@ -4171,8 +4189,10 @@ index 000000000..7b5fb48e8
 +    idx_mapping_ptr,
 +    # [num_reqs] int8: the request was decoding (row 0's input is draft zero)
 +    decoding_ptr,
-+    # [num_logits] int8, [num_logits]
++    # [num_logits] int8, [num_logits] float32 (each row's largest |column|),
++    # [num_logits]
 +    flags_ptr,
++    values_ptr,
 +    draft_ptr,
 +    # This step's alternates: [num_reqs, NUM_ALTERNATES]
 +    new_alternates_ptr,
@@ -4209,6 +4229,7 @@ index 000000000..7b5fb48e8
 +        tl.store(events + 1, 2)
 +        tl.store(events + 2, 0)
 +        tl.store(events + 3, -1)
++        tl.store(events + 4, 0)
 +        return
 +
 +    req_state_idx = tl.load(idx_mapping_ptr + req).to(tl.int64)
@@ -4298,10 +4319,16 @@ index 000000000..7b5fb48e8
 +        outcome = tl.where(draft_zero_flag, 1, outcome)
 +        drafter_flags = accepted_flags
 +        cut_row = -1
++    # The largest flagged value among the rows the step judged (up to the
++    # first rejected draft), for the log line.
++    judged = row_flags & (rows <= num_sampled)
++    row_values = tl.load(values_ptr + start + rows, mask=rows < num_logits, other=0.0)
++    value = tl.max(tl.where(judged, row_values, 0.0), axis=0)
 +    tl.store(events + 0, outcome)
 +    tl.store(events + 1, tl.where(decoding, 0, 2))
 +    tl.store(events + 2, drafter_flags)
 +    tl.store(events + 3, cut_row)
++    tl.store(events + 4, value.to(tl.int32))
 +    tl.atomic_add(counts_ptr + 0, draft_zero_flag.to(tl.int64))
 +    tl.atomic_add(counts_ptr + 1, drafter_flags.to(tl.int64))
 +    tl.atomic_add(counts_ptr + 2, ((not decoding) & row0_flag).to(tl.int64))
@@ -4371,6 +4398,7 @@ index 000000000..7b5fb48e8
 +        int64,
 +        int8,
 +        int8,
++        float32,
 +        int32,
 +        int64,
 +        float32,
@@ -4490,6 +4518,8 @@ index 000000000..7b5fb48e8
 +        self._logged_counts = (0,) * len(SinkRow)
 +        # Set during the startup warmup (end_warmup clears it).
 +        self.warming = False
++        # Each logits row's largest |column| of the last flags() call.
++        self.row_values: torch.Tensor | None = None
 +
 +    def flags(
 +        self,
@@ -4504,7 +4534,9 @@ index 000000000..7b5fb48e8
 +        watched column of every token's pre-norm residual streams,
 +        ``[tokens, streams]`` float32. Rows past a request's live drafts
 +        (``dead_cut``) are never flagged: they skipped routed MoE."""
-+        flags = (columns[logits_indices].abs() > self.config.threshold).any(dim=1)
++        rows = columns[logits_indices].abs()
++        self.row_values = rows.amax(dim=1).nan_to_num(0.0)
++        flags = (rows > self.config.threshold).any(dim=1)
 +        if dead_cut is not None:
 +            rows = torch.arange(
 +                flags.shape[0], dtype=cu_num_logits.dtype, device=self.device
@@ -4684,12 +4716,17 @@ index 000000000..7b5fb48e8
 +        alternates: SinkAlternates | None,
 +        total_len: torch.Tensor,
 +        bin_counts: torch.Tensor,
++        values: torch.Tensor | None = None,
 +    ) -> SinkStepOutput:
 +        """The draft-zero policy, the alternates' bookkeeping and the step's
 +        events. With rejection on, updates ``sampled``, ``num_sampled`` and
 +        ``num_rejected`` in place for the requests whose draft zero it
 +        rejects, and takes draft zero out of their request state."""
 +        num_reqs, sampled_width = sampled.shape
++        if values is None:
++            values = self.row_values
++        if values is None:
++            values = torch.zeros(flags.shape, dtype=torch.float32, device=self.device)
 +        events = torch.empty(
 +            (num_reqs, NUM_SINK_EVENT_FIELDS), dtype=torch.int32, device=self.device
 +        )
@@ -4724,6 +4761,7 @@ index 000000000..7b5fb48e8
 +            idx_mapping,
 +            decoding,
 +            flags,
++            values,
 +            drafts,
 +            new_tokens,
 +            alternates.logprobs if logprobs else self.alternate_logprobs,

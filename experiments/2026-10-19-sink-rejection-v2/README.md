@@ -6,7 +6,7 @@ token, with the forward pass untouched. v1 of the candidate (record on the local
 rollback. A read-only review the same day found the rollback unsafe. This record rebuilds the
 correction on the speculative-decoding machinery.
 
-**Status:** vLLM branch `sink-rejection-v2`, one commit on `r6x-candidate` f3b58ed9d (e1c474dca), in
+**Status:** vLLM branch `sink-rejection-v2`, one commit on `r6x-candidate` f3b58ed9d (0d63e52a3), in
 ~/projects/vllm-ds41-sink-rejection; the series patch
 [vllm/0221-Sink-detector-and-draft-zero-rejection.patch](vllm/0221-Sink-detector-and-draft-zero-rejection.patch)
 (provisional number 0221, replacing v1's 0221; one patch onto `r6x-candidate` f3b58ed9d).
@@ -196,6 +196,7 @@ The GPU gate measures the step cost.
 | v2, 7f4c7dc8e (one commit on `r6x-candidate`) | 5,063 | 2,069 / 59 (29 files) | 1,752 |
 | v2, 2334b92c0 (the column capture in the SM120 model) | 5,069 | 2,073 / 59 (29 files) | 1,752 |
 | v2, e1c474dca (warmup rows neither logged nor counted) | 5,126 | 2,083 / 59 (29 files) | 1,791 |
+| v2, 0d63e52a3 (each event logs its largest flagged value) | 5,164 | 2,107 / 59 (29 files) | 1,805 |
 
 Cut from the first build, with the same tests passing: the flags, the cut and the merge of the
 candidates became torch operations (three Triton kernels and their warmup declarations gone; the
@@ -231,7 +232,7 @@ fail in the image as built.
 
 [screen.json](screen.json) then [probes.json](probes.json), queued into one lab window on the TP3
 triangle. The arms mount the candidate's 29
-changed vLLM files ([overlay/](overlay), now vLLM e1c474dca; the screen ran 2334b92c0) over the r6x
+changed vLLM files ([overlay/](overlay), now vLLM 0d63e52a3; the screen ran 2334b92c0) over the r6x
 image, whose tree is the
 candidate's base: every change is Python, so this is the candidate's image.
 
@@ -311,6 +312,17 @@ run's own repeat (correction, then correction-again).
   zero, so each warmup pass logged flagged rows before the server was ready; the counts were reset,
   but the last line before the reset stayed. vLLM e1c474dca keeps the warmup silent (`warming`, then
   `end_warmup()`), with a GPU test; overlays and patch carry it.
+
+## Survey (owner, 2026-10-20: survey high rows, then set the threshold from the data)
+
+vLLM 0d63e52a3 adds to each sink event the largest |residual[2455]| among the request's flagged rows
+that step, printed in the scheduler's `Sink:` line. [survey.json](survey.json) boots
+[survey-detector.json](survey-detector.json), the detector alone at threshold 20,000 (decoding is
+r6x's), and runs [survey.py](survey.py) three times: servebench's 256 default prompts at the server's
+default sampling, 128 of the other template-topic pairs greedily, and the 16 collapse probes at
+thinking high, 1,024 tokens each at 8 streams. It joins every `Sink:` line to its response with the
+tokens around the flagged position. The highest normal rows then go through DeepSeek's CPU reference
+(as [analysis/false_positive_rows.txt](analysis/false_positive_rows.txt)) to read their predictions.
 
 ## Planned GPU gate (waits for a new threshold and its survey)
 

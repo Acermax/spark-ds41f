@@ -1,5 +1,5 @@
 {
- "notes": "r6x-dev.json with the candidate's vLLM files (overlay/, vLLM e1c474dca on r6x-candidate f3b58ed9d, the image's tree) and the detector and draft-zero rejection on.",
+ "notes": "r6x-dev.json with the candidate's vLLM files (overlay/, vLLM 0d63e52a3 on r6x-candidate f3b58ed9d, the image's tree) and the detector and draft-zero rejection on.",
  "extends": {
   "config": "experiments/2026-10-19-sink-rejection-v2/r6x-dev.json"
  },

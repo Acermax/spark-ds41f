@@ -4138,13 +4138,14 @@ class Scheduler(SchedulerInterface):
         request.sink_metrics.observe(event)
         logger.info(
             "Sink: request %s, next output position %d: %s row %s, %d drafter "
-            "row(s) flagged%s",
+            "row(s) flagged%s, value %d",
             request.request_id,
             request.num_output_tokens,
             event.row0.label,
             event.outcome.name.lower(),
             event.num_drafter_flags,
             f", cut at row {event.cut_row}" if event.cut_row >= 0 else "",
+            event.value,
         )
 
     def _sink_logprobs(
