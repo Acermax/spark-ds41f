@@ -51,20 +51,25 @@ candidate's base: the change is Python only, so this is the candidate's image.
 | [broadcast-tp4-dev.json](broadcast-tp4-dev.json) | the same with the dev-mode collective RPC, for the release suite's grid |
 | [gate-tp4.json](gate-tp4.json) | r6x's determinism gate on the candidate |
 | [release-tp4.json](release-tp4.json) | release and single-stream suites: candidate, r6x, candidate again |
+| [broadcast-tp3.json](broadcast-tp3.json), [broadcast-tp3-dev.json](broadcast-tp3-dev.json) | the same on the triangle at 1M (r6x-tp3-1m) |
+| [gate-tp3.json](gate-tp3.json), [release-tp3.json](release-tp3.json) | the triangle's gate and release comparison (release-tp3 and single-stream suites) |
 | [runs/run-tests.sh](runs/run-tests.sh) | the CPU tests in a throwaway container on an idle node |
 
 ## Gates, in order
 
-1. **Determinism** ([gate-tp4.json](gate-tp4.json)): temperature-0 and greedy outputs identical
-   to r6x's (r6x's gate equalled r6v's: 3eab5112 / db25fde3, c9cf9dbe / c6bb4f4e), zero token
-   and log-probability differences in every scenario.
+On whichever shape is cabled (the triangle on 2026-10-20); the other shape follows with the same
+overlay.
+
+1. **Determinism** ([gate-tp4.json](gate-tp4.json), [gate-tp3.json](gate-tp3.json)):
+   temperature-0 and greedy outputs identical to r6x's on that shape, zero token and
+   log-probability differences in every scenario (on the ring r6x's gate equalled r6v's:
+   3eab5112 / db25fde3, c9cf9dbe / c6bb4f4e).
 2. **Memory**: the PyTorch NCCL communicator is gone. Compare the arms' KV cache size lines and
    the suites' recorded memory floors (`conditions.json`) between the candidate and r6x.
-3. **Release comparison** ([release-tp4.json](release-tp4.json)): no metric worse than r6x. The
-   step-time effect is expected to be small (well under 1%); the reasons to adopt are the policy
-   hole, the second communicator and its memory, and a single failure model.
-
-TP3 follows on the triangle with the same overlay once the ring passes.
+3. **Release comparison** ([release-tp4.json](release-tp4.json),
+   [release-tp3.json](release-tp3.json)): no metric worse than r6x. The step-time effect is
+   expected to be small (well under 1%); the reasons to adopt are the policy hole, the second
+   communicator and its memory, and a single failure model.
 
 ## Acceptance
 
