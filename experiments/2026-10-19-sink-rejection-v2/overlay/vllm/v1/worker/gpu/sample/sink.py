@@ -133,8 +133,10 @@ def _sink_policy_kernel(
     idx_mapping_ptr,
     # [num_reqs] int8: the request was decoding (row 0's input is draft zero)
     decoding_ptr,
-    # [num_logits] int8, [num_logits]
+    # [num_logits] int8, [num_logits] float32 (each row's largest |column|),
+    # [num_logits]
     flags_ptr,
+    values_ptr,
     draft_ptr,
     # This step's alternates: [num_reqs, NUM_ALTERNATES]
     new_alternates_ptr,
@@ -171,6 +173,7 @@ def _sink_policy_kernel(
         tl.store(events + 1, 2)
         tl.store(events + 2, 0)
         tl.store(events + 3, -1)
+        tl.store(events + 4, 0)
         return
 
     req_state_idx = tl.load(idx_mapping_ptr + req).to(tl.int64)
@@ -260,10 +263,16 @@ def _sink_policy_kernel(
         outcome = tl.where(draft_zero_flag, 1, outcome)
         drafter_flags = accepted_flags
         cut_row = -1
+    # The largest flagged value among the rows the step judged (up to the
+    # first rejected draft), for the log line.
+    judged = row_flags & (rows <= num_sampled)
+    row_values = tl.load(values_ptr + start + rows, mask=rows < num_logits, other=0.0)
+    value = tl.max(tl.where(judged, row_values, 0.0), axis=0)
     tl.store(events + 0, outcome)
     tl.store(events + 1, tl.where(decoding, 0, 2))
     tl.store(events + 2, drafter_flags)
     tl.store(events + 3, cut_row)
+    tl.store(events + 4, value.to(tl.int32))
     tl.atomic_add(counts_ptr + 0, draft_zero_flag.to(tl.int64))
     tl.atomic_add(counts_ptr + 1, drafter_flags.to(tl.int64))
     tl.atomic_add(counts_ptr + 2, ((not decoding) & row0_flag).to(tl.int64))
@@ -333,6 +342,7 @@ def _policy_warmup_inputs(
         int64,
         int8,
         int8,
+        float32,
         int32,
         int64,
         float32,
@@ -452,6 +462,8 @@ class SinkSampler:
         self._logged_counts = (0,) * len(SinkRow)
         # Set during the startup warmup (end_warmup clears it).
         self.warming = False
+        # Each logits row's largest |column| of the last flags() call.
+        self.row_values: torch.Tensor | None = None
 
     def flags(
         self,
@@ -466,7 +478,9 @@ class SinkSampler:
         watched column of every token's pre-norm residual streams,
         ``[tokens, streams]`` float32. Rows past a request's live drafts
         (``dead_cut``) are never flagged: they skipped routed MoE."""
-        flags = (columns[logits_indices].abs() > self.config.threshold).any(dim=1)
+        rows = columns[logits_indices].abs()
+        self.row_values = rows.amax(dim=1).nan_to_num(0.0)
+        flags = (rows > self.config.threshold).any(dim=1)
         if dead_cut is not None:
             rows = torch.arange(
                 flags.shape[0], dtype=cu_num_logits.dtype, device=self.device
@@ -646,12 +660,17 @@ class SinkSampler:
         alternates: SinkAlternates | None,
         total_len: torch.Tensor,
         bin_counts: torch.Tensor,
+        values: torch.Tensor | None = None,
     ) -> SinkStepOutput:
         """The draft-zero policy, the alternates' bookkeeping and the step's
         events. With rejection on, updates ``sampled``, ``num_sampled`` and
         ``num_rejected`` in place for the requests whose draft zero it
         rejects, and takes draft zero out of their request state."""
         num_reqs, sampled_width = sampled.shape
+        if values is None:
+            values = self.row_values
+        if values is None:
+            values = torch.zeros(flags.shape, dtype=torch.float32, device=self.device)
         events = torch.empty(
             (num_reqs, NUM_SINK_EVENT_FIELDS), dtype=torch.int32, device=self.device
         )
@@ -686,6 +705,7 @@ class SinkSampler:
             idx_mapping,
             decoding,
             flags,
+            values,
             drafts,
             new_tokens,
             alternates.logprobs if logprobs else self.alternate_logprobs,
