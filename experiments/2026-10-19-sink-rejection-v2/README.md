@@ -6,20 +6,16 @@ token, with the forward pass untouched. v1 of the candidate (record on the local
 rollback. A read-only review the same day found the rollback unsafe. This record rebuilds the
 correction on the speculative-decoding machinery.
 
-**Status:** vLLM branch `sink-rejection-v2`, one commit on `r6x-candidate` f3b58ed9d (616d1a28d), in
+**Status:** vLLM branch `sink-rejection-v2`, one commit on `r6x-candidate` f3b58ed9d (5ac8364ec), in
 ~/projects/vllm-ds41-sink-rejection; the series patch
 [vllm/0221-Sink-detector-and-draft-zero-rejection.patch](vllm/0221-Sink-detector-and-draft-zero-rejection.patch)
-(provisional number 0221, replacing v1's 0221; one patch onto `r6x-candidate` f3b58ed9d).
-The first build (ad9059483, a commit on v1's branch) was cut down the same day without a behaviour
-change; see [Size](#size).
-CPU tests and dgx4's own GPU pass ([runs/tests.txt](runs/tests.txt)). **Screened on the TP3 triangle
-on 2026-10-19 ([Screen](#screen-owner-2026-10-19-a-short-screen-first-then-the-gate)): not
-release-ready.** Speed is r6x's, time to first token grows by one decode step, and the correction
-removes the `Say hi.` / `Thanks!` collapse with every rank flagging the same rows. But the 50,000
-threshold also flagged ordinary number tokens: 2 of the screen's 128 greedy responses changed. A
-survey of 358,785 served tokens ([Survey](#survey-owner-2026-10-20-survey-high-rows-then-set-the-threshold-from-the-data))
-puts ordinary text at most at 62,720 and the collapse rows at 116,736-118,784; the threshold is now
-85,000 (616d1a28d), and the screen runs again (`-screen3`, `-probes3`).
+(provisional number 0221, replacing v1's 0221; one patch onto `r6x-candidate` f3b58ed9d). CPU tests and
+dgx4's own GPU pass ([runs/tests.txt](runs/tests.txt)). Screened twice on the TP3 triangle. The first
+screen (threshold 50,000) changed 2 of 128 greedy responses at number tokens; a 358,785-token survey
+set the threshold to 85,000; the second screen gives 128/128 greedy responses identical to r6x, still
+cleans `Say hi.`, `Thanks!` and `ok` with every rank flagging the same rows, keeps throughput level,
+and adds one decode step to time to first token. Open before the gate: the second screen's engine grid
+read +1.13% / +0.47% against r6x (the first's +0.17% / -0.21%), which a dedicated A/B should settle.
 
 ## What v1 got wrong, and what v2 does instead
 
@@ -336,6 +332,10 @@ dgx1's startup memory guard (MemAvailable 34 MB under its 5 GiB floor); the imme
 |---|---|---|---|---|---|---|
 | rows at or above | 526 | 285 | 116 | 24 | 3 | 0 |
 
+Each count is one step's largest flagged row (the Sink: line reports one value per request and
+step), so it counts steps; a per-row count could only be higher where two rows of one step pass a
+bin. Every value is a real served row's: the attribution run below names the rows of the top ones.
+
 - **Ordinary text peaks at 62,720** ("H2‖ 1.3%"), then 61,184 (`max‖_n=2`) and 60,928 ("structure
   ‖3-4 paragraphs"). Every row above 50,000 is a number context: times, amounts, percentages,
   `NUMERIC(8,2)`, ranges.
@@ -344,17 +344,90 @@ dgx1's startup memory guard (MemAvailable 34 MB under its 5 GiB floor); the imme
 - **The tail falls about 8x per 10,000** from 50,000 to 60,000. If it keeps falling so, a threshold
   of 80,000 flags about one ordinary row per 8 M generated tokens, 85,000 one per 22 M, 90,000 one
   per 61 M.
-- **DeepSeek's reference on the top row** (x203, greedy, reproduced on production r6x; teacher-forced,
-  [analysis/case-x203.json](analysis/case-x203.json)): the row is the lone space before `1.3%`
-  (reply token 688) and predicts `1` at -0.23; the reply's other high rows (spaces before digits,
-  reference 33,280-46,848) predict their digits as confidently. The reference reads that row at
-  38,912 against the served 62,720: on number rows served values ran 1.1-1.6x the reference's here.
-  The threshold is therefore set on served values, where both the ordinary tail and the collapse
-  rows (116,736-118,784) were measured.
+- **DeepSeek's reference on the top rows:** the reply's high rows (spaces before digits) predict
+  their digits confidently, as the survey's ordinary rows should. An earlier version of this record
+  said served values "ran 1.1-1.6x the reference's" on number rows; that rested on three rows of one
+  reply whose attribution was inferred, because the Sink: line then gave the step's next output
+  position with the step's largest value, not that value's row. vLLM 5ac8364ec names the row; the
+  attribution run below confirms those three rows and finds the ratio running both ways (0.59-1.61).
 
 **Threshold: 85,000** (vLLM 616d1a28d), the geometric midpoint between the largest ordinary row
 (62,720) and the smallest sunk row seen anywhere (108,032, DeepSeek's reference): about 1.35x of
 margin on each side.
+
+### Re-screen at 85,000 (runs `-screen3` and `-probes3`, 2026-10-20 07:42-09:15 UTC, vLLM 616d1a28d)
+
+Tables and probes: [runs/screen3/](runs/screen3). Verdicts against the run's own repeat.
+
+| | correction vs r6x | correction-again vs r6x | repeat | verdict |
+|---|---|---|---|---|
+| greedy responses identical (128) | 128/128 | 128/128 | 128/128 | same text as r6x |
+| engine grid, geometric mean of 15 shapes | +1.13% | +0.47% | -0.65% | worse (first screen +0.17% / -0.21%) |
+| 8 streams | +0.23% | +0.18% | -0.06% | same |
+| one stream | -1.22% (±7.0%) | | -0.25% | same |
+| logprobs (5), 1 / 8 streams | -1.54% / -0.06% | | -0.37% / -0.23% | same |
+| prefill 32K / 256K | -0.31% / -0.24% | | -0.13% / -0.11% | same |
+| time to first token, p50, 1 / 8 streams | 0.124 -> 0.162 s / 0.357 -> 0.472 s | | level | one decode step |
+
+- **Model behaviour:** 128/128 greedy responses identical to r6x on both correction arms, rank-1
+  fraction 1.0: the number-token false positives are gone.
+- **Collapse probes:** `Say hi.` (`Hi! 👋 How's your day going?`), `Thanks!` (`You're welcome! 😊
+  Let me know if you need anything else — happy to help.`) and `ok` (`Got it! What would you like help
+  with?`) flagged and cleaned; the other 13 byte-identical to r6x; the detector arm byte-identical to
+  r6x on all 16. Every rank logged the same counts (8 rows on correction, 5 on detector), and
+  `VLLM_SINK_DETECTOR_CHECK_RANKS=1` never raised.
+- **Engine grid:** the per-shape changes are largest at the smallest shapes (+1.0% to +2.3% at 1-3
+  rows), as a fixed cost of about 0.2 ms a step would be; r6x itself moved -0.45% between the two
+  screens, and the code added between them (each row's value for the log, a sixth event field) is two
+  small tensor operations a step. Not settled; see Open.
+- **Startup:** the correction arm's log shows only the detector's configuration line: the warmup's
+  rows are no longer logged (e1c474dca).
+
+### x203 against the reference, position by position
+
+Owner's question: do the served engine and DeepSeek's reference part ways past the 128-token window,
+where the compressed KV and the sparse indexer run? Production r6x scored x203's prompt and greedy
+reply (738 ids, reproduced on production) with `prompt_logprobs` 5, a teacher-forced prefill, against
+the reference's teacher-forced run ([analysis/x203_gap.py](analysis/x203_gap.py),
+[analysis/x203_gap.txt](analysis/x203_gap.txt)).
+
+| | median gap (nats) | p90 | max | top-1 agreement | gaps over 3 nats |
+|---|---|---|---|---|---|
+| positions below 128 (127) | 0.047 | 0.311 | 5.43 | 89.8% | 1 (position 16, inside the prompt's effort line) |
+| positions from 128 (610) | 0.026 | 0.215 | 1.41 | 93.1% | 0 |
+
+No jump at 128: past the window production's prefill follows the reference as closely as before it,
+within the FP8 noise floor (gaps up to about 3 nats). The predictions made from x203's three high
+sink-column rows match to 0.002-0.039 nats.
+
+### Row attribution (run `-attribution`, 2026-10-20 10:22-10:25 UTC, vLLM 5ac8364ec)
+
+The detector-only arm at 20,000 reran d027, d045 and x203 greedily; each Sink: line now names the row
+holding its value. Every served prompt and reply matched the reference's ids up to each compared row
+([analysis/attribution_compare.py](analysis/attribution_compare.py),
+[analysis/attribution_compare.txt](analysis/attribution_compare.txt), [runs/attribution/](runs/attribution)).
+
+| reply, row (flagged input in brackets) | served | reference | served / reference |
+|---|---|---|---|
+| x203 688, `H2[ ]1.3%` | 62,720 | 38,912 | 1.61 |
+| x203 681, `H1[ ]1.0%` | 48,384 | 33,280 | 1.45 |
+| x203 609, `Hive[ ]3` | 51,200 | 46,848 | 1.09 |
+| d027 155, `amplitude[ ]1.5 m` | 41,728 | 38,400 | 1.09 |
+| d027 173, `at least[ ]9.2` | 23,808 | 30,848 | 0.77 |
+| d027 175, `at least 9[.]2` | 22,016 | 14,144 | 1.56 |
+| d027 230, `between[ ]1.0` | 51,456 | 47,360 | 1.09 |
+| d045 158, `OpenLogic [202]4` | 23,040 | 39,168 | 0.59 |
+| d045 236, `high-risk? [202]3` | 53,504 | 51,968 | 1.03 |
+
+- The survey's 62,720 is x203's row 688 (the space before `1.3%`): the earlier comparison read the
+  right row, but nothing logged could show it then.
+- Served against reference runs 0.59-1.61, median 1.09, both ways: on number rows past the window the
+  sink column of the served decode rows wanders by up to ±60% from the reference's prefill rows, while
+  the predictions agree (above). The collapse rows (positions 39 and 74, inside the window) agreed within
+  about 8%.
+- **The threshold stands.** It was set on served values on both sides: the ordinary tail's largest row
+  (62,720, now attributed) and the served collapse rows (116,736-118,784); the re-screen at 85,000 gives
+  128/128 identical.
 
 ## Planned GPU gate (waits for a new threshold and its survey)
 
@@ -404,7 +477,15 @@ column is part of the compile cache key.
 
 - **The threshold** is 85,000 from a 358,785-token survey: about one false positive per 22 M tokens
   if the tail keeps falling as measured, and 0.73x of the smallest served collapse row. Three served
-  collapse rows is a small sample of the sink side.
+  collapse rows is a small sample of the sink side, and served sink values on number rows wander ±60%
+  from the reference's (row attribution); a sink row past the window reading 0.6x would sit near the
+  threshold.
+- **Step cost.** The second screen's engine grid read +1.13% / +0.47% against r6x (the first's +0.17% /
+  -0.21%). A same-session A/B of the detector arm against r6x on the grid alone, repeated, should say
+  whether the sink path costs about 0.2 ms a step.
+- **Served decode against reference prefill.** The sink column of served decode rows differs from the
+  reference's prefill rows by up to ±60% on number rows while predictions agree; a served prefill of
+  the same rows (a debug read of the column for every prompt row) would split decode from prefill.
 - The per-rank counts read 2 draft-zero rows more than the scheduler's on both probe arms; check that
   they are the discarded in-flight steps of finished requests.
 
